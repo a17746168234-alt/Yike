@@ -127,6 +127,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         mainWindow = window
         window.isReleasedWhenClosed = false
         window.delegate = self
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.toolbarStyle = .unified
+        window.isMovableByWindowBackground = true
         NSApp.setActivationPolicy(.regular)
     }
 
@@ -685,7 +691,6 @@ private func renderedTranslationImage(
 private enum TranslationEngine: String, CaseIterable, Identifiable {
     case apple
     case deepl
-    case myMemory
 
     var id: String { rawValue }
 
@@ -693,7 +698,6 @@ private enum TranslationEngine: String, CaseIterable, Identifiable {
         switch self {
         case .apple: return "Apple 系统翻译"
         case .deepl: return "DeepL 高质量"
-        case .myMemory: return "MyMemory 免费"
         }
     }
 
@@ -701,7 +705,6 @@ private enum TranslationEngine: String, CaseIterable, Identifiable {
         switch self {
         case .apple: return "Apple 翻译"
         case .deepl: return "DeepL"
-        case .myMemory: return "MyMemory"
         }
     }
 }
@@ -713,33 +716,6 @@ private struct AppleTranslationRequest: Identifiable, Equatable {
     let source: String
     let target: String
     let glossaryMap: [String: String]
-}
-
-private struct TranslationPayload: Decodable {
-    struct ResponseData: Decodable {
-        let translatedText: String
-    }
-
-    let responseData: ResponseData
-    let responseStatus: Int?
-    let responseDetails: String?
-
-    enum CodingKeys: String, CodingKey {
-        case responseData, responseStatus, responseDetails
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        responseData = try container.decode(ResponseData.self, forKey: .responseData)
-        responseDetails = try container.decodeIfPresent(String.self, forKey: .responseDetails)
-        if let status = try? container.decode(Int.self, forKey: .responseStatus) {
-            responseStatus = status
-        } else if let status = try? container.decode(String.self, forKey: .responseStatus) {
-            responseStatus = Int(status)
-        } else {
-            responseStatus = nil
-        }
-    }
 }
 
 private struct DeepLTranslationPayload: Decodable {
@@ -924,7 +900,7 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
     @Published private(set) var isResultSpeechPaused = false
     @Published private(set) var isPreparingSpeech = false
     @Published private(set) var speechStatusMessage: String?
-    @Published var onlineVoiceGender: OnlineVoiceGender = .female
+    @Published var onlineVoicePersona: OnlineVoicePersona = .female
     @Published var onlineSpeechRatePercent = -6
     @Published private(set) var speechHighlightedSentenceIndex = -1
     @Published var glossary: [GlossaryEntry] = []
@@ -941,6 +917,7 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
     private let imageHistoryKey = "yijian.image.translation.history"
     private let imageHistoryEnabledKey = "yijian.image.history.recording.enabled"
     private let glossaryKey = "yijian.translation.glossary"
+    private let voicePersonaKey = "yijian.online-speech.voice-persona"
     private let speechRateKey = "yijian.online-speech.rate-percent"
     private let audioEngine = AVAudioEngine()
     private let onlineSpeechService = OnlineTTSService()
@@ -995,6 +972,11 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
         }
         if UserDefaults.standard.object(forKey: imageHistoryEnabledKey) != nil {
             imageHistoryRecordingEnabled = UserDefaults.standard.bool(forKey: imageHistoryEnabledKey)
+        }
+        if let value = UserDefaults.standard.string(forKey: voicePersonaKey) {
+            let persona: OnlineVoicePersona = (value == "male" || value == "youthfulMale") ? .male : .female
+            onlineVoicePersona = persona
+            UserDefaults.standard.set(persona.rawValue, forKey: voicePersonaKey)
         }
         if UserDefaults.standard.object(forKey: speechRateKey) != nil {
             onlineSpeechRatePercent = min(30, max(-30, UserDefaults.standard.integer(forKey: speechRateKey)))
@@ -1229,13 +1211,14 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
         switch selectedEngine {
         case .apple:
             if #available(macOS 15.0, *) {
-                popupAppleTranslationRequest = PopupAppleTranslationRequest(
+                let request = PopupAppleTranslationRequest(
                     text: prepared.0,
                     originalText: cleanText,
                     source: source,
                     target: target,
                     glossaryMap: prepared.1
                 )
+                popupAppleTranslationRequest = request
             } else {
                 popupIsLoading = false
                 popupNotice = AppNotice(kind: .error, message: "Apple 系统翻译需要 macOS 15 或更高版本")
@@ -1264,27 +1247,6 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
                     self.showPopupTranslationError(error)
                 }
             }
-        case .myMemory:
-            popupTranslationTask = Task { [weak self] in
-                guard let self else { return }
-                do {
-                    var translatedChunks: [String] = []
-                    for chunk in textChunks(prepared.0, maximumLength: 450) {
-                        translatedChunks.append(try await self.translateMyMemoryChunk(chunk, source: source, target: target))
-                    }
-                    guard !Task.isCancelled else { return }
-                    self.finishPopupTranslation(
-                        translatedChunks.joined(separator: "\n"),
-                        original: cleanText,
-                        source: source,
-                        target: target,
-                        glossaryMap: prepared.1
-                    )
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    self.showPopupTranslationError(error)
-                }
-            }
         }
     }
 
@@ -1292,6 +1254,7 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
     func completePopupAppleTranslation(using session: TranslationSession, request: PopupAppleTranslationRequest) async {
         guard popupAppleTranslationRequest?.id == request.id else { return }
         do {
+            try await session.prepareTranslation()
             let response = try await session.translate(request.text)
             guard popupAppleTranslationRequest?.id == request.id else { return }
             finishPopupTranslation(
@@ -1305,6 +1268,26 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
             guard popupAppleTranslationRequest?.id == request.id else { return }
             showPopupTranslationError(error)
         }
+    }
+
+    @available(macOS 26.0, *)
+    private func translatePopupWithInstalledApple(_ request: PopupAppleTranslationRequest) async {
+        guard popupAppleTranslationRequest?.id == request.id,
+              let sourceID = appleTranslationLocales[request.source],
+              let targetID = appleTranslationLocales[request.target] else { return }
+        let source = Locale.Language(identifier: sourceID)
+        let target = Locale.Language(identifier: targetID)
+        guard await LanguageAvailability().status(from: source, to: target) == .installed else {
+            popupIsLoading = false
+            popupAppleTranslationRequest = nil
+            popupTranslationTask = nil
+            popupNotice = AppNotice(kind: .error, message: "Apple 系统翻译语言包尚未安装")
+            return
+        }
+        await completePopupAppleTranslation(
+            using: TranslationSession(installedSource: source, target: target),
+            request: request
+        )
     }
 
     private func finishPopupTranslation(
@@ -1719,7 +1702,7 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
         switch selectedEngine {
         case .apple:
             if #available(macOS 15.0, *) {
-                appleTranslationRequest = AppleTranslationRequest(
+                let request = AppleTranslationRequest(
                     id: requestID,
                     text: prepared.0,
                     originalText: cleanText,
@@ -1727,10 +1710,11 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
                     target: target,
                     glossaryMap: prepared.1
                 )
+                appleTranslationRequest = request
             } else {
                 translationRequestGate.cancel()
                 isLoading = false
-                setError("Apple 系统翻译需要 macOS 15 或更高版本，请改用 DeepL 或 MyMemory")
+                setError("Apple 系统翻译需要 macOS 15 或更高版本，请改用 DeepL")
             }
         case .deepl:
             guard hasDeepLKey else {
@@ -1749,17 +1733,6 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
                     requestID: requestID
                 )
             }
-        case .myMemory:
-            translationTask = Task { [weak self] in
-                await self?.translateWithMyMemory(
-                    prepared.0,
-                    originalText: cleanText,
-                    source: effectiveSource,
-                    target: target,
-                    glossaryMap: prepared.1,
-                    requestID: requestID
-                )
-            }
         }
     }
 
@@ -1768,6 +1741,7 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
         guard appleTranslationRequest?.id == request.id,
               translationRequestGate.accepts(request.id) else { return }
         do {
+            try await session.prepareTranslation()
             let response = try await session.translate(request.text)
             guard appleTranslationRequest?.id == request.id,
                   translationRequestGate.accepts(request.id) else { return }
@@ -1779,14 +1753,40 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
                 glossaryMap: request.glossaryMap
             )
             translationRequestGate.cancel()
+            translationTask = nil
+            appleTranslationRequest = nil
             isLoading = false
         } catch {
             guard appleTranslationRequest?.id == request.id,
                   translationRequestGate.accepts(request.id) else { return }
             translationRequestGate.cancel()
+            translationTask = nil
+            appleTranslationRequest = nil
             isLoading = false
             setError("Apple 系统翻译暂时无法完成：\(error.localizedDescription)")
         }
+    }
+
+    @available(macOS 26.0, *)
+    private func translateWithInstalledApple(_ request: AppleTranslationRequest) async {
+        guard appleTranslationRequest?.id == request.id,
+              translationRequestGate.accepts(request.id),
+              let sourceID = appleTranslationLocales[request.source],
+              let targetID = appleTranslationLocales[request.target] else { return }
+
+        let source = Locale.Language(identifier: sourceID)
+        let target = Locale.Language(identifier: targetID)
+        let status = await LanguageAvailability().status(from: source, to: target)
+        guard status == .installed else {
+            translationRequestGate.cancel()
+            translationTask = nil
+            appleTranslationRequest = nil
+            isLoading = false
+            setError("Apple 系统翻译语言包尚未安装，请先在系统设置的语言与地区中下载对应语言")
+            return
+        }
+        let session = TranslationSession(installedSource: source, target: target)
+        await completeAppleTranslation(using: session, request: request)
     }
 
     private func beginImageTranslation(source: String, target: String) {
@@ -1802,14 +1802,15 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
         switch selectedEngine {
         case .apple:
             if #available(macOS 15.0, *) {
-                appleImageTranslationRequest = AppleImageTranslationRequest(
+                let request = AppleImageTranslationRequest(
                     blocks: recognizedImageBlocks,
                     source: source,
                     target: target
                 )
+                appleImageTranslationRequest = request
             } else {
                 isLoading = false
-                setError("Apple 系统翻译需要 macOS 15 或更高版本，请改用 DeepL 或 MyMemory")
+                setError("Apple 系统翻译需要 macOS 15 或更高版本，请改用 DeepL")
             }
         case .deepl:
             guard hasDeepLKey else {
@@ -1823,13 +1824,6 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
                 guard let self else { return }
                 await self.translateImageWithDeepL(sourceImage: sourceImage, blocks: blocks, source: source, target: target)
             }
-        case .myMemory:
-            let blocks = recognizedImageBlocks
-            imageTranslationTask?.cancel()
-            imageTranslationTask = Task { [weak self] in
-                guard let self else { return }
-                await self.translateImageWithMyMemory(sourceImage: sourceImage, blocks: blocks, source: source, target: target)
-            }
         }
     }
 
@@ -1837,6 +1831,7 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
     func completeAppleImageTranslation(using session: TranslationSession, request: AppleImageTranslationRequest) async {
         guard appleImageTranslationRequest?.id == request.id, let sourceImage else { return }
         do {
+            try await session.prepareTranslation()
             var translations: [String] = []
             translations.reserveCapacity(request.blocks.count)
             for block in request.blocks {
@@ -1852,41 +1847,35 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
                 source: request.source,
                 target: request.target
             )
+            appleImageTranslationRequest = nil
+            imageTranslationTask = nil
         } catch {
             guard appleImageTranslationRequest?.id == request.id else { return }
+            appleImageTranslationRequest = nil
+            imageTranslationTask = nil
             isLoading = false
             setError("Apple 系统图片翻译暂时无法完成：\(error.localizedDescription)")
         }
     }
 
-    private func translateImageWithMyMemory(
-        sourceImage: NSImage,
-        blocks: [RecognizedImageBlock],
-        source: String,
-        target: String
-    ) async {
-        do {
-            var translations: [String] = []
-            translations.reserveCapacity(blocks.count)
-            for block in blocks {
-                let prepared = glossaryPreparedText(block.text, source: source, target: target)
-                var translatedChunks: [String] = []
-                for chunk in textChunks(prepared.0, maximumLength: 450) {
-                    translatedChunks.append(try await translateMyMemoryChunk(chunk, source: source, target: target))
-                }
-                translations.append(restoreGlossary(in: translatedChunks.joined(separator: " "), replacements: prepared.1))
-            }
-            finishImageTranslation(
-                sourceImage: sourceImage,
-                blocks: blocks,
-                translations: translations,
-                source: source,
-                target: target
-            )
-        } catch {
+    @available(macOS 26.0, *)
+    private func translateImageWithInstalledApple(_ request: AppleImageTranslationRequest) async {
+        guard appleImageTranslationRequest?.id == request.id,
+              let sourceID = appleTranslationLocales[request.source],
+              let targetID = appleTranslationLocales[request.target] else { return }
+        let source = Locale.Language(identifier: sourceID)
+        let target = Locale.Language(identifier: targetID)
+        guard await LanguageAvailability().status(from: source, to: target) == .installed else {
+            appleImageTranslationRequest = nil
+            imageTranslationTask = nil
             isLoading = false
-            showTranslationError(error)
+            setError("Apple 系统翻译语言包尚未安装，请先下载对应语言")
+            return
         }
+        await completeAppleImageTranslation(
+            using: TranslationSession(installedSource: source, target: target),
+            request: request
+        )
     }
 
     private func translateImageWithDeepL(
@@ -2072,61 +2061,6 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
         } catch {
             setError("保存译文图片失败：\(error.localizedDescription)")
         }
-    }
-
-    private func translateWithMyMemory(
-        _ cleanText: String,
-        originalText: String,
-        source: String,
-        target: String,
-        glossaryMap: [String: String],
-        requestID: UUID
-    ) async {
-        do {
-            var translatedChunks: [String] = []
-            for chunk in textChunks(cleanText, maximumLength: 450) {
-                translatedChunks.append(try await translateMyMemoryChunk(chunk, source: source, target: target))
-                guard !Task.isCancelled, translationRequestGate.accepts(requestID) else { return }
-            }
-            let result = translatedChunks.joined(separator: "\n")
-            guard translationRequestGate.accepts(requestID) else { return }
-            acceptTranslation(
-                result,
-                original: originalText,
-                source: source,
-                target: target,
-                glossaryMap: glossaryMap
-            )
-            finishTextTranslation(requestID: requestID)
-        } catch {
-            guard !Task.isCancelled, translationRequestGate.accepts(requestID) else { return }
-            finishTextTranslation(requestID: requestID)
-            showTranslationError(error)
-        }
-    }
-
-    private func translateMyMemoryChunk(_ text: String, source: String, target: String) async throws -> String {
-        var components = URLComponents(string: "https://api.mymemory.translated.net/get")!
-        components.queryItems = [
-            URLQueryItem(name: "q", value: text),
-            URLQueryItem(name: "langpair", value: "\(source)|\(target)")
-        ]
-        guard let url = components.url else { throw AppTranslationError.invalidRequest }
-
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 12
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw AppTranslationError.serviceUnavailable
-        }
-
-        let payload = try JSONDecoder().decode(TranslationPayload.self, from: data)
-        guard payload.responseStatus == nil || payload.responseStatus == 200 else {
-            throw AppTranslationError.provider(payload.responseDetails ?? "翻译失败")
-        }
-        return decodeEntities(payload.responseData.translatedText)
     }
 
     private func translateWithDeepL(
@@ -2317,11 +2251,12 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
         }
     }
 
-    func setOnlineVoiceGender(_ gender: OnlineVoiceGender) {
-        guard onlineVoiceGender != gender else { return }
+    func setOnlineVoicePersona(_ persona: OnlineVoicePersona) {
+        guard onlineVoicePersona != persona else { return }
         stopOnlineSpeech()
         cancelSpeechPreload()
-        onlineVoiceGender = gender
+        onlineVoicePersona = persona
+        UserDefaults.standard.set(persona.rawValue, forKey: voicePersonaKey)
         preGenerateResultSpeech()
     }
 
@@ -2427,7 +2362,7 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
 
     private func startOnlineSpeech(_ text: String, language: String) {
         stopOnlineSpeech()
-        guard let voice = OnlineTTSService.voice(for: language, gender: onlineVoiceGender) else {
+        guard let voice = OnlineTTSService.voice(for: language, persona: onlineVoicePersona) else {
             speechStatusMessage = "在线朗读仅支持中文、英文、日文和韩文"
             return
         }
@@ -2477,7 +2412,7 @@ private final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlay
         let value = (text ?? translatedText).trimmingCharacters(in: .whitespacesAndNewlines)
         let language = language ?? targetLanguage
         guard !value.isEmpty,
-              let voice = OnlineTTSService.voice(for: language, gender: onlineVoiceGender) else { return }
+              let voice = OnlineTTSService.voice(for: language, persona: onlineVoicePersona) else { return }
 
         let cacheKey = OnlineTTSService.cacheKey(
             text: value,
@@ -3058,8 +2993,8 @@ private final class SelectionTranslationPanelController: NSObject, NSWindowDeleg
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.isMovableByWindowBackground = true
-        panel.isOpaque = true
-        panel.backgroundColor = .windowBackgroundColor
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
@@ -3079,7 +3014,7 @@ private final class SelectionTranslationPanelController: NSObject, NSWindowDeleg
         hostingView.autoresizingMask = [.width, .height]
         hostingView.sizingOptions = []
         hostingView.wantsLayer = true
-        hostingView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = hostingView
         panel.setContentSize(size)
         return panel
@@ -3153,7 +3088,7 @@ private struct SelectionTranslationPopup: View {
     @ObservedObject var model: TranslatorViewModel
     let close: () -> Void
     let replace: () -> Void
-    private let blue = Color(red: 0.08, green: 0.45, blue: 0.96)
+    private let blue = MacVisualTokens.accent
 
     var body: some View {
         GeometryReader { geometry in
@@ -3257,7 +3192,10 @@ private struct SelectionTranslationPopup: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background {
+                AdaptiveGlassBackdrop(materialOpacity: 0.94, tintOpacity: 0.22)
+                    .ignoresSafeArea()
+            }
         }
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: 320, minHeight: 190)
@@ -3281,14 +3219,15 @@ private struct SelectionTranslationPopup: View {
                 Button(languageName(code)) { action(code) }
             }
         } label: {
-            Text(languageName(selection))
-            .font(.system(size: 13, weight: .heavy))
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 11)
-            .frame(height: 28)
-            .background(Color.white.opacity(0.06))
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1))
+            HStack(spacing: 5) {
+                Text(languageName(selection))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(MacVisualTokens.tertiaryLabel)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(MacVisualTokens.label)
+            .macHoverControl(cornerRadius: 8, horizontalPadding: 8, height: 28)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -3300,6 +3239,7 @@ private struct SelectionTranslationPopup: View {
 private struct PopupAppleTranslationWorker: View {
     @ObservedObject var model: TranslatorViewModel
     @State private var configuration: TranslationSession.Configuration?
+    @State private var activeRequest: PopupAppleTranslationRequest?
 
     var body: some View {
         Color.clear
@@ -3309,6 +3249,7 @@ private struct PopupAppleTranslationWorker: View {
                 guard let request,
                       let sourceID = appleTranslationLocales[request.source],
                       let targetID = appleTranslationLocales[request.target] else { return }
+                activeRequest = request
                 var next = TranslationSession.Configuration(
                     source: Locale.Language(identifier: sourceID),
                     target: Locale.Language(identifier: targetID)
@@ -3317,9 +3258,213 @@ private struct PopupAppleTranslationWorker: View {
                 configuration = next
             }
             .translationTask(configuration) { session in
-                guard let request = model.popupAppleTranslationRequest else { return }
+                guard let request = activeRequest,
+                      model.popupAppleTranslationRequest?.id == request.id else { return }
                 await model.completePopupAppleTranslation(using: session, request: request)
             }
+    }
+}
+
+private enum MacVisualTokens {
+    static let accent = Color.accentColor
+    static let label = Color(nsColor: .labelColor)
+    static let secondaryLabel = Color(nsColor: .secondaryLabelColor)
+    static let tertiaryLabel = Color(nsColor: .tertiaryLabelColor)
+    static let separator = Color(nsColor: .separatorColor)
+    static let controlFill = Color(nsColor: .controlBackgroundColor)
+    static let panelRadius: CGFloat = 20
+    static let controlRadius: CGFloat = 9
+    static let floatingRadius: CGFloat = 12
+}
+
+/// A single, shared glass recipe used by the window backdrop, title bar and
+/// translation card.  The material is rendered first, then the mode-specific
+/// tint is placed above it so backdrop content cannot introduce a left/right
+/// colour shift.
+private struct UnifiedGlassLayer: View {
+    @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
+    @Environment(\.colorScheme) private var colorScheme
+    let tint: Color
+    let materialOpacity: Double
+    let isUltraThin: Bool
+    var isRegular: Bool = false
+
+    var body: some View {
+        Group {
+            if glassEnabled {
+                ZStack {
+                    if isRegular {
+                        Rectangle()
+                            .fill(.regularMaterial)
+                            .opacity(materialOpacity)
+                    } else if isUltraThin {
+                        Rectangle()
+                            .fill(.ultraThinMaterial)
+                            .opacity(materialOpacity)
+                    } else {
+                        Rectangle()
+                            .fill(.thinMaterial)
+                            .opacity(materialOpacity)
+                    }
+                    Rectangle()
+                        .fill(tint)
+                }
+            } else {
+                Rectangle()
+                    .fill(colorScheme == .dark
+                        ? Color(red: 0.055, green: 0.065, blue: 0.085)
+                        : Color(red: 0.976, green: 0.978, blue: 0.995))
+            }
+        }
+    }
+}
+
+private struct AdaptiveGlassBackdrop: View {
+    @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
+    @Environment(\.colorScheme) private var colorScheme
+    var materialOpacity = 0.88
+    var tintOpacity = 0.26
+    var regular = true
+
+    var body: some View {
+        Group {
+            if glassEnabled {
+                UnifiedGlassLayer(
+                    tint: colorScheme == .dark
+                        ? Color.black.opacity(tintOpacity)
+                        : Color.white.opacity(tintOpacity),
+                    materialOpacity: materialOpacity,
+                    isUltraThin: !regular,
+                    isRegular: regular
+                )
+            } else {
+                Rectangle()
+                    .fill(colorScheme == .dark
+                        ? Color(red: 0.10, green: 0.115, blue: 0.145)
+                        : Color.white)
+            }
+        }
+    }
+}
+
+private enum GlassSurfaceLevel: Equatable {
+    case card
+    case editor
+}
+
+private struct GlassSurfaceModifier: ViewModifier {
+    @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
+    @Environment(\.colorScheme) private var colorScheme
+    let cornerRadius: CGFloat
+    let level: GlassSurfaceLevel
+
+    private var tintOpacity: Double {
+        switch level {
+        case .card: return 0.09
+        case .editor: return 0.18
+        }
+    }
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background {
+                Group {
+                    if glassEnabled {
+                        ZStack {
+                            if level == .editor {
+                                shape.fill(.regularMaterial).opacity(0.94)
+                            } else {
+                                shape.fill(.thinMaterial).opacity(0.86)
+                            }
+                            shape.fill(colorScheme == .dark
+                                ? Color.black.opacity(tintOpacity)
+                                : Color.white.opacity(tintOpacity))
+                            shape.stroke(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(colorScheme == .dark ? 0.30 : 0.82),
+                                             MacVisualTokens.separator.opacity(0.42)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 0.8
+                            )
+                        }
+                    } else {
+                        ZStack {
+                            shape.fill(colorScheme == .dark
+                                ? Color(red: 0.10, green: 0.115, blue: 0.145)
+                                : Color.white)
+                            shape.stroke(MacVisualTokens.separator.opacity(0.72), lineWidth: 0.8)
+                        }
+                    }
+                }
+            }
+            .clipShape(shape)
+            .shadow(
+                color: glassEnabled
+                    ? Color.black.opacity(level == .editor ? (colorScheme == .dark ? 0.22 : 0.10) : 0.07)
+                    : Color.black.opacity(0.04),
+                radius: glassEnabled ? (level == .editor ? 14 : 8) : 3,
+                y: glassEnabled ? (level == .editor ? 6 : 3) : 1
+            )
+    }
+}
+
+private struct HoverMaterialModifier: ViewModifier {
+    @State private var isHovering = false
+    let cornerRadius: CGFloat
+    let horizontalPadding: CGFloat
+    let height: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, horizontalPadding)
+            .frame(height: height)
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(isHovering ? AnyShapeStyle(.thinMaterial) : AnyShapeStyle(Color.clear))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.14)) { isHovering = hovering }
+            }
+    }
+}
+
+private extension View {
+    func macHoverControl(
+        cornerRadius: CGFloat = MacVisualTokens.controlRadius,
+        horizontalPadding: CGFloat = 9,
+        height: CGFloat = 32
+    ) -> some View {
+        modifier(HoverMaterialModifier(
+            cornerRadius: cornerRadius,
+            horizontalPadding: horizontalPadding,
+            height: height
+        ))
+    }
+
+    func macGlassBorder(cornerRadius: CGFloat) -> some View {
+        overlay {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(MacVisualTokens.separator.opacity(0.72), lineWidth: 0.75)
+        }
+    }
+
+    func glassSurface(cornerRadius: CGFloat, level: GlassSurfaceLevel = .card) -> some View {
+        modifier(GlassSurfaceModifier(cornerRadius: cornerRadius, level: level))
+    }
+}
+
+private struct FloatingGlassButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .glassSurface(cornerRadius: MacVisualTokens.floatingRadius)
+            .shadow(color: Color.black.opacity(0.09), radius: 7, y: 3)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .opacity(configuration.isPressed ? 0.84 : 1)
+            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
     }
 }
 
@@ -3329,11 +3474,7 @@ private struct SubmitTextEditor: NSViewRepresentable {
     let onSubmit: () -> Void
     let onImageDrop: (URL) -> Void
 
-    private var editorTextColor: NSColor {
-        isDarkMode
-            ? NSColor(calibratedRed: 0.93, green: 0.95, blue: 0.98, alpha: 1)
-            : NSColor(calibratedRed: 0.08, green: 0.10, blue: 0.14, alpha: 1)
-    }
+    private var editorTextColor: NSColor { .labelColor }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -3343,6 +3484,8 @@ private struct SubmitTextEditor: NSViewRepresentable {
         let scrollView = NSScrollView()
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = false
+        scrollView.backgroundColor = .clear
+        scrollView.contentView.backgroundColor = .clear
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
 
@@ -3353,17 +3496,18 @@ private struct SubmitTextEditor: NSViewRepresentable {
         textView.isRichText = false
         textView.importsGraphics = false
         textView.drawsBackground = false
+        textView.backgroundColor = .clear
         textView.allowsUndo = true
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
-        textView.textContainerInset = NSSize(width: 22, height: 18)
-        textView.font = NSFont.systemFont(ofSize: 17, weight: .regular)
+        textView.textContainerInset = NSSize(width: 24, height: 20)
+        textView.font = NSFont.systemFont(ofSize: 15, weight: .regular)
         textView.textColor = editorTextColor
-        textView.insertionPointColor = NSColor(calibratedRed: 0.08, green: 0.45, blue: 0.96, alpha: 1)
+        textView.insertionPointColor = .controlAccentColor
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 7
+        paragraph.lineSpacing = 5
         textView.defaultParagraphStyle = paragraph
         textView.string = text
         scrollView.documentView = textView
@@ -3453,15 +3597,18 @@ private struct LanguageMenu: View {
                 Button(languageName(code)) { onChange(code) }
             }
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "globe").font(.system(size: 14, weight: .semibold)).foregroundStyle(color)
-                Text(languageName(selection)).font(.system(size: 14, weight: .semibold)).foregroundStyle(textColor)
+            HStack(spacing: 7) {
+                Image(systemName: "globe")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(color)
+                Text(languageName(selection))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(textColor)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(MacVisualTokens.tertiaryLabel)
             }
-            .padding(.horizontal, 15)
-            .frame(height: 38)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.90))
-            .clipShape(RoundedRectangle(cornerRadius: 13))
-            .overlay(RoundedRectangle(cornerRadius: 13).stroke(Color.primary.opacity(0.14)))
+            .macHoverControl(horizontalPadding: 10, height: 34)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -3473,6 +3620,8 @@ private struct LanguageMenu: View {
 private struct AppleTranslationWorker: View {
     @ObservedObject var model: TranslatorViewModel
     @State private var configuration: TranslationSession.Configuration?
+    @State private var activeTextRequest: AppleTranslationRequest?
+    @State private var activeImageRequest: AppleImageTranslationRequest?
 
     var body: some View {
         Color.clear
@@ -3481,6 +3630,8 @@ private struct AppleTranslationWorker: View {
                 guard let request,
                       let sourceID = appleTranslationLocales[request.source],
                       let targetID = appleTranslationLocales[request.target] else { return }
+                activeTextRequest = request
+                activeImageRequest = nil
                 var next = TranslationSession.Configuration(
                     source: Locale.Language(identifier: sourceID),
                     target: Locale.Language(identifier: targetID)
@@ -3492,6 +3643,8 @@ private struct AppleTranslationWorker: View {
                 guard let request,
                       let sourceID = appleTranslationLocales[request.source],
                       let targetID = appleTranslationLocales[request.target] else { return }
+                activeImageRequest = request
+                activeTextRequest = nil
                 var next = TranslationSession.Configuration(
                     source: Locale.Language(identifier: sourceID),
                     target: Locale.Language(identifier: targetID)
@@ -3500,9 +3653,11 @@ private struct AppleTranslationWorker: View {
                 configuration = next
             }
             .translationTask(configuration) { session in
-                if let request = model.appleImageTranslationRequest {
+                if let request = activeImageRequest,
+                   model.appleImageTranslationRequest?.id == request.id {
                     await model.completeAppleImageTranslation(using: session, request: request)
-                } else if let request = model.appleTranslationRequest {
+                } else if let request = activeTextRequest,
+                          model.appleTranslationRequest?.id == request.id {
                     await model.completeAppleTranslation(using: session, request: request)
                 }
             }
@@ -3523,8 +3678,8 @@ private struct HistorySheet: View {
     @State private var selectedIDs: Set<UUID> = []
     @State private var searchText = ""
     @State private var historyKind: HistoryKind = .text
-    private let purple = Color(red: 0.08, green: 0.45, blue: 0.96)
-    private let line = Color(red: 0.88, green: 0.89, blue: 0.93)
+    private let purple = MacVisualTokens.accent
+    private let line = MacVisualTokens.separator.opacity(0.68)
 
     private var filteredHistory: [TranslationHistory] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -3538,7 +3693,7 @@ private struct HistorySheet: View {
         VStack(spacing: 0) {
             HStack {
                 Label("历史记录", systemImage: "clock.arrow.circlepath")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 19, weight: .semibold))
                 Spacer()
                 if historyKind == .text && !model.history.isEmpty {
                     if isSelecting {
@@ -3577,7 +3732,11 @@ private struct HistorySheet: View {
                     .buttonStyle(.borderedProminent)
                     .tint(purple)
             }
-            .padding(22)
+            .padding(.horizontal, 22)
+            .frame(height: 62)
+            .background {
+                AdaptiveGlassBackdrop(materialOpacity: 0.78, tintOpacity: 0.14, regular: false)
+            }
 
             Picker("历史类型", selection: $historyKind) {
                 ForEach(HistoryKind.allCases) { kind in
@@ -3612,8 +3771,7 @@ private struct HistorySheet: View {
                 .font(.system(size: 13))
                 .padding(.horizontal, 12)
                 .frame(height: 34)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .glassSurface(cornerRadius: 10)
                 .padding(.horizontal, 22)
                 .padding(.bottom, 10)
             }
@@ -3731,17 +3889,20 @@ private struct HistorySheet: View {
                                 if selectedIDs.contains(item.id) { selectedIDs.remove(item.id) }
                                 else { selectedIDs.insert(item.id) }
                             }
-                            .background(Color(nsColor: .controlBackgroundColor))
-                            .clipShape(RoundedRectangle(cornerRadius: 13))
+                            .glassSurface(cornerRadius: 13)
                             .overlay(RoundedRectangle(cornerRadius: 13).stroke(item.isPinned ? purple.opacity(0.45) : line))
                         }
                     }
                     .padding(20)
                 }
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(Color.clear)
             }
         }
         .frame(width: 680, height: 560)
+        .background {
+            AdaptiveGlassBackdrop(materialOpacity: 0.92, tintOpacity: 0.24)
+                .ignoresSafeArea()
+        }
     }
 
     @ViewBuilder
@@ -3800,14 +3961,13 @@ private struct HistorySheet: View {
                             .buttonStyle(.borderless)
                         }
                         .padding(14)
-                        .background(Color(nsColor: .controlBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 13))
+                        .glassSurface(cornerRadius: 13)
                         .overlay(RoundedRectangle(cornerRadius: 13).stroke(line))
                     }
                 }
                 .padding(20)
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(Color.clear)
         }
     }
 
@@ -3840,7 +4000,7 @@ private struct DeepLSettingsSheet: View {
     @ObservedObject var model: TranslatorViewModel
     @Binding var isPresented: Bool
     @State private var apiKey: String
-    private let purple = Color(red: 0.08, green: 0.45, blue: 0.96)
+    private let purple = MacVisualTokens.accent
 
     init(model: TranslatorViewModel, isPresented: Binding<Bool>) {
         self.model = model
@@ -3853,7 +4013,7 @@ private struct DeepLSettingsSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("设置 DeepL API Free")
-                        .font(.system(size: 20, weight: .bold))
+                        .font(.system(size: 19, weight: .semibold))
                     Text("密钥只保存在这台电脑的系统钥匙串中。")
                         .font(.system(size: 12))
                         .foregroundStyle(Color.secondary)
@@ -3890,8 +4050,7 @@ private struct DeepLSettingsSheet: View {
                     }
                 }
                 .padding(12)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .glassSurface(cornerRadius: 10)
             } else if model.hasDeepLKey {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -3929,6 +4088,10 @@ private struct DeepLSettingsSheet: View {
         }
         .padding(24)
         .frame(width: 500)
+        .background {
+            AdaptiveGlassBackdrop(materialOpacity: 0.92, tintOpacity: 0.24)
+                .ignoresSafeArea()
+        }
         .onAppear {
             if model.hasDeepLKey {
                 Task { await model.fetchDeepLUsage() }
@@ -4593,6 +4756,7 @@ private struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: TranslatorViewModel
     @AppStorage("fanyi.appearance.mode") private var appearanceMode = "system"
+    @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
     @State private var glossarySource = ""
     @State private var glossaryTarget = ""
     @State private var glossarySourceLanguage = "en"
@@ -4608,13 +4772,16 @@ private struct SettingsSheet: View {
         VStack(spacing: 0) {
             HStack {
                 Text("设置")
-                    .font(.system(size: 21, weight: .bold))
+                    .font(.system(size: 19, weight: .semibold))
                 Spacer()
                 Button("完成") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, 24)
             .frame(height: 62)
+            .background {
+                AdaptiveGlassBackdrop(materialOpacity: 0.78, tintOpacity: 0.14, regular: false)
+            }
             Divider()
 
             ScrollView {
@@ -4626,6 +4793,14 @@ private struct SettingsSheet: View {
                             Text("深色").tag("dark")
                         }
                         .pickerStyle(.segmented)
+                        Toggle(isOn: $glassEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("玻璃质感")
+                                Text(glassEnabled ? "使用当前半透明毛玻璃界面" : "使用经典不透明界面")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Color.secondary)
+                            }
+                        }
                         if let usage = model.deepLUsage {
                             LabeledContent("DeepL 免费额度") {
                                 Text("剩余 \(max(0, usage.characterLimit - usage.characterCount)) / \(usage.characterLimit) 字符")
@@ -4655,11 +4830,12 @@ private struct SettingsSheet: View {
                                 .frame(width: 46, alignment: .trailing)
                         }
                         Picker("音色", selection: Binding(
-                            get: { model.onlineVoiceGender },
-                            set: { model.setOnlineVoiceGender($0) }
+                            get: { model.onlineVoicePersona },
+                            set: { model.setOnlineVoicePersona($0) }
                         )) {
-                            Text("女声").tag(OnlineVoiceGender.female)
-                            Text("男声").tag(OnlineVoiceGender.male)
+                            ForEach(OnlineVoicePersona.allCases) { persona in
+                                Text(persona.title).tag(persona)
+                            }
                         }
                         .pickerStyle(.segmented)
                         HStack {
@@ -4732,14 +4908,14 @@ private struct SettingsSheet: View {
                                 }
                             }
                             .padding(.horizontal, 10)
-                            .background(Color.secondary.opacity(0.055))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .glassSurface(cornerRadius: 10)
                         }
                     }
 
                     settingsCard("关于与更新", icon: "info.circle") {
                         LabeledContent("当前版本") { Text(versionText) }
-                        Text("本次更新：截图翻译先留出 3 秒切换窗口；原图文字改为可视化区域编辑；划词浮窗与图片翻译完全隔离。")
+                        LabeledContent("开发者") { Text("由 null 打造") }
+                        Text("本次更新：新增玻璃质感开关，可在当前毛玻璃界面与经典不透明界面之间切换；并统一主界面、历史记录与完整设置的外观。")
                             .font(.system(size: 12))
                             .foregroundStyle(Color.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -4749,6 +4925,10 @@ private struct SettingsSheet: View {
             }
         }
         .frame(width: 760, height: 650)
+        .background {
+            AdaptiveGlassBackdrop(materialOpacity: 0.92, tintOpacity: 0.24)
+                .ignoresSafeArea()
+        }
         .onAppear {
             model.refreshSpeechCacheSize()
             if model.hasDeepLKey { Task { await model.fetchDeepLUsage() } }
@@ -4758,13 +4938,12 @@ private struct SettingsSheet: View {
     private func settingsCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(title, systemImage: icon)
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: 15, weight: .semibold))
             content()
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.055))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .glassSurface(cornerRadius: 14)
     }
 
     private func permissionRow(_ title: String, status: String, action: @escaping () -> Void) -> some View {
@@ -4792,6 +4971,7 @@ private struct SettingsSheet: View {
 private struct TranslatorView: View {
     @StateObject private var model = TranslatorViewModel.shared
     @AppStorage("fanyi.appearance.mode") private var appearanceMode = "system"
+    @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
     @Environment(\.colorScheme) private var colorScheme
     @State private var showHistory = false
     @State private var showDeepLSettings = false
@@ -4800,9 +4980,8 @@ private struct TranslatorView: View {
     @State private var showImageComparison = false
     @State private var showImageEditor = false
     @State private var showSettings = false
-    private let purple = Color(red: 0.08, green: 0.45, blue: 0.96)
-    private let violet = Color(red: 0.18, green: 0.68, blue: 1.00)
-    private let mint = Color(red: 0.06, green: 0.65, blue: 0.48)
+    private let accent = MacVisualTokens.accent
+    private let success = Color(nsColor: .systemGreen)
     private var effectiveDarkMode: Bool { colorScheme == .dark }
     private var preferredScheme: ColorScheme? {
         switch appearanceMode {
@@ -4818,26 +4997,40 @@ private struct TranslatorView: View {
         default: return "跟随系统"
         }
     }
-    private var ink: Color { effectiveDarkMode ? Color(red: 0.93, green: 0.95, blue: 0.98) : Color(red: 0.08, green: 0.10, blue: 0.14) }
-    private var line: Color { effectiveDarkMode ? Color.white.opacity(0.12) : Color(red: 0.88, green: 0.89, blue: 0.93) }
-    private var surface: Color { effectiveDarkMode ? Color(red: 0.10, green: 0.115, blue: 0.145) : .white }
-    private var canvas: Color { effectiveDarkMode ? Color(red: 0.055, green: 0.065, blue: 0.085) : Color(red: 0.976, green: 0.978, blue: 0.995) }
+    private var ink: Color { MacVisualTokens.label }
+    private var line: Color { MacVisualTokens.separator.opacity(effectiveDarkMode ? 0.78 : 0.62) }
+    private var surface: Color { MacVisualTokens.controlFill }
+    /// All non-editor surfaces use the same material strength and tint.  Keeping
+    /// this in one place prevents the left/right panes and the header/footer from
+    /// drifting into visibly different glass tones.
+    // A shared semi-transparent strength for every glass surface.  The same
+    // value is used in light and dark mode so the title bar and content panes
+    // keep one consistent translucency level.
+    private let glassMaterialOpacity = 0.88
+    private var glassTint: Color {
+        effectiveDarkMode ? Color.black.opacity(0.32) : Color.white.opacity(0.32)
+    }
+    private var windowTint: Color { glassTint }
+    private var editorTint: Color {
+        Color.clear
+    }
 
     var body: some View {
         ZStack {
-            canvas.ignoresSafeArea()
-            Circle().fill(purple.opacity(0.055)).frame(width: 520).blur(radius: 70).offset(x: -520, y: -270)
-            Circle().fill(Color.blue.opacity(0.045)).frame(width: 420).blur(radius: 55).offset(x: 540, y: -280)
-            Circle().fill(mint.opacity(0.035)).frame(width: 460).blur(radius: 75).offset(x: 520, y: 270)
-            Circle().stroke((effectiveDarkMode ? Color.blue : Color.white).opacity(0.35), lineWidth: 26).frame(width: 220).blur(radius: 5).offset(x: -600, y: -180)
+            UnifiedGlassLayer(
+                tint: windowTint,
+                materialOpacity: glassMaterialOpacity,
+                isUltraThin: false,
+                isRegular: true
+            )
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 header
-                    .padding(.horizontal, 34)
                 translatorCard
-                    .padding(.horizontal, 34)
-                    .padding(.top, 16)
-                    .padding(.bottom, 18)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 20)
+                    .padding(.bottom, 22)
                     .frame(maxHeight: .infinity)
             }
         }
@@ -4909,16 +5102,19 @@ private struct TranslatorView: View {
                 Image(nsImage: NSApplication.shared.applicationIconImage)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 42, height: 42)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .shadow(color: Color.blue.opacity(0.20), radius: 9, y: 5)
-                Text("Mac翻译").font(.system(size: 21, weight: .bold)).foregroundStyle(ink)
-                Label(engineStatusText, systemImage: model.selectedEngine == .apple ? "desktopcomputer" : "checkmark.shield")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ink)
+                    .frame(width: 38, height: 38)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Mac翻译")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(ink)
+                    Label(engineStatusText, systemImage: model.selectedEngine == .apple ? "desktopcomputer" : "checkmark.shield")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(MacVisualTokens.secondaryLabel)
+                }
             }
             Spacer()
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Menu {
                     Button {
                         model.setEngine(.apple)
@@ -4934,11 +5130,6 @@ private struct TranslatorView: View {
                     } label: {
                         Label("DeepL 高质量", systemImage: model.selectedEngine == .deepl ? "checkmark" : "sparkles")
                     }
-                    Button {
-                        model.setEngine(.myMemory)
-                    } label: {
-                        Label("MyMemory 免费", systemImage: model.selectedEngine == .myMemory ? "checkmark" : "globe")
-                    }
                     Divider()
                     if let usage = model.deepLUsage {
                         Text("DeepL 用量：\(usage.characterCount) / \(usage.characterLimit) 字符（\(usage.usedPercentText)%）")
@@ -4947,32 +5138,33 @@ private struct TranslatorView: View {
                         showDeepLSettings = true
                     }
                 } label: {
-                    HStack(spacing: 9) {
-                        Circle().fill(model.selectedEngine == .apple ? Color.blue : mint).frame(width: 8, height: 8)
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(model.selectedEngine == .apple ? accent : success)
+                            .frame(width: 7, height: 7)
                         Text(model.selectedEngine.shortName)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(MacVisualTokens.tertiaryLabel)
                     }
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(ink)
+                    .macHoverControl(horizontalPadding: 10, height: 36)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .padding(.horizontal, 15)
-                .frame(height: 38)
-                .background(surface.opacity(0.75))
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(line))
 
                 Button(action: { showHistory = true }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "clock").font(.system(size: 12, weight: .semibold))
+                    HStack(spacing: 7) {
+                        Image(systemName: "clock.arrow.circlepath").font(.system(size: 14, weight: .medium))
                         Text("历史记录")
-                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
                     }
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(ink)
-                    .padding(.horizontal, 15).frame(height: 38)
-                    .background(surface.opacity(0.75)).clipShape(Capsule()).overlay(Capsule().stroke(line))
-                }.buttonStyle(.plain)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(ink)
+                    .macHoverControl(horizontalPadding: 10, height: 36)
+                }
+                .buttonStyle(.plain)
 
                 Menu {
                     Button {
@@ -5018,12 +5210,10 @@ private struct TranslatorView: View {
                     }
                 } label: {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(ink)
-                        .frame(width: 38, height: 38)
-                        .background(surface.opacity(0.82))
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(line))
+                        .macHoverControl(cornerRadius: 9, horizontalPadding: 0, height: 36)
+                        .frame(width: 36)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -5031,37 +5221,45 @@ private struct TranslatorView: View {
                 .help("设置")
             }
         }
-        .padding(.top, 18)
-        .frame(maxWidth: 1180)
+        .padding(.leading, 48)
+        .padding(.trailing, 24)
+        .padding(.top, 5)
+        .frame(maxWidth: .infinity)
+        .frame(height: 78)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(line).frame(height: 0.5)
+        }
     }
 
     private var translatorCard: some View {
         VStack(spacing: 0) {
             ZStack {
                 HStack {
-                    LanguageMenu(color: purple, textColor: ink, selection: model.sourceLanguage, options: sourceLanguagesWithAuto, onChange: model.setSourceLanguage)
+                    LanguageMenu(color: accent, textColor: ink, selection: model.sourceLanguage, options: sourceLanguagesWithAuto, onChange: model.setSourceLanguage)
                     Spacer()
-                    LanguageMenu(color: purple, textColor: ink, selection: model.targetLanguage, onChange: model.setTargetLanguage)
+                    LanguageMenu(color: accent, textColor: ink, selection: model.targetLanguage, onChange: model.setTargetLanguage)
                 }
 
-                Button(action: model.swapLanguages) { Image(systemName: "arrow.left.arrow.right").font(.system(size: 15, weight: .semibold)).foregroundStyle(purple) }
-                    .buttonStyle(.plain)
+                Button(action: model.swapLanguages) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(accent)
+                        .frame(width: 40, height: 40)
+                }
+                    .buttonStyle(FloatingGlassButtonStyle())
                     .disabled(model.hasImageTranslation)
                     .opacity(model.hasImageTranslation ? 0.42 : 1)
-                    .frame(width: 42, height: 42).background(surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(purple.opacity(0.15)))
-                    .shadow(color: purple.opacity(0.08), radius: 8, y: 4)
             }
-            .padding(.horizontal, 30).frame(height: 66)
+            .padding(.horizontal, 22)
+            .frame(height: 58)
 
-            Divider().overlay(line)
+            Rectangle().fill(line).frame(height: 0.5)
 
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     ZStack {
                         if let sourceImage = model.sourceImage {
-                            TranslationImagePane(image: sourceImage, title: "原图", accent: purple) {
+                            TranslationImagePane(image: sourceImage, title: "原图", accent: accent) {
                                 imagePreview = ImagePreviewItem(title: "原图", image: sourceImage)
                             }
                             .contextMenu {
@@ -5083,10 +5281,7 @@ private struct TranslatorView: View {
                                             .font(.system(size: 11, weight: .semibold))
                                             .padding(.horizontal, 10)
                                             .frame(height: 30)
-                                            .background(surface.opacity(0.92))
-                                            .clipShape(Capsule())
-                                            .overlay(Capsule().stroke(purple.opacity(0.25)))
-                                            .shadow(color: Color.black.opacity(0.08), radius: 5, y: 2)
+                                            .glassSurface(cornerRadius: 8)
                                     }
                                     .buttonStyle(.plain)
                                     .foregroundStyle(ink)
@@ -5101,6 +5296,7 @@ private struct TranslatorView: View {
                                 get: { model.sourceText },
                                 set: { model.sourceText = String($0.prefix(maxSourceCharacters)) }
                             ), isDarkMode: effectiveDarkMode, onSubmit: model.translate, onImageDrop: model.recognizeAndTranslateImage)
+                            .background(editorTint)
                         }
 
                         if model.isRecognizingImage || model.isCapturingRegion {
@@ -5117,17 +5313,20 @@ private struct TranslatorView: View {
                                     .foregroundStyle(Color.secondary)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(surface.opacity(0.94))
+                            .background {
+                                AdaptiveGlassBackdrop(materialOpacity: 0.96, tintOpacity: 0.18)
+                            }
                         } else if model.sourceImage == nil && model.sourceText.isEmpty {
                             VStack(spacing: 9) {
                                 Text(inputPlaceholder)
-                                    .font(.system(size: 17, weight: .regular))
+                                    .font(.system(size: 15, weight: .regular))
                                 Label(imageDropHint, systemImage: "photo.on.rectangle.angled")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(ink)
+                                    .font(.system(size: 12, weight: .regular))
+                                    .foregroundStyle(MacVisualTokens.secondaryLabel)
                             }
-                            .foregroundStyle(ink)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                            .foregroundStyle(MacVisualTokens.secondaryLabel)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .padding(.top, 86)
                             .allowsHitTesting(false)
                         }
                     }
@@ -5135,7 +5334,7 @@ private struct TranslatorView: View {
                         Spacer()
                         Text(model.hasImageTranslation ? "图片原文 · \(model.sourceText.count) 字符" : "\(model.sourceText.count) / \(maxSourceCharacters)")
                             .font(.system(size: 11))
-                            .foregroundStyle(ink)
+                            .foregroundStyle(MacVisualTokens.tertiaryLabel)
                     }
                     .padding(.horizontal, 28).frame(height: 42)
                 }
@@ -5145,25 +5344,35 @@ private struct TranslatorView: View {
                     if isImageDropTargeted {
                         ZStack {
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(purple.opacity(0.10))
+                                .fill(accent.opacity(0.09))
                             RoundedRectangle(cornerRadius: 16)
-                                .stroke(purple, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                                .stroke(accent, style: StrokeStyle(lineWidth: 1.5, dash: [7, 5]))
                             VStack(spacing: 10) {
                                 Image(systemName: "photo.badge.arrow.down")
                                     .font(.system(size: 34, weight: .medium))
                                 Text("松开鼠标，开始翻译图片")
-                                    .font(.system(size: 16, weight: .bold))
+                                    .font(.system(size: 15, weight: .medium))
                                 Text("支持英语、中文、日语和韩语")
                                     .font(.system(size: 12))
                             }
-                            .foregroundStyle(purple)
+                            .foregroundStyle(accent)
                         }
                         .padding(10)
                         .allowsHitTesting(false)
                     }
                 }
 
-                Divider().overlay(line)
+                Rectangle()
+                    .fill(glassEnabled
+                        ? AnyShapeStyle(LinearGradient(
+                            colors: [Color.white.opacity(effectiveDarkMode ? 0.36 : 0.90),
+                                     MacVisualTokens.separator.opacity(0.40),
+                                     Color.white.opacity(effectiveDarkMode ? 0.08 : 0.20)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ))
+                        : AnyShapeStyle(line))
+                    .frame(width: 0.8)
 
                 VStack(spacing: 0) {
                     Group {
@@ -5191,41 +5400,60 @@ private struct TranslatorView: View {
                                 }
                             }.frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else if let translatedImage = model.translatedImage {
-                            TranslationImagePane(image: translatedImage, title: "译文图片 · \(model.imageRenderStyle.title)", accent: violet) {
+                            TranslationImagePane(image: translatedImage, title: "译文图片 · \(model.imageRenderStyle.title)", accent: accent) {
                                 imagePreview = ImagePreviewItem(title: "译文图片 · \(model.imageRenderStyle.title)", image: translatedImage)
                             }
                         } else if model.translatedText.isEmpty {
                             VStack(spacing: 12) {
                                 ZStack {
-                                    RoundedRectangle(cornerRadius: 14).fill(purple.opacity(0.055)).frame(width: 76, height: 56).offset(y: 7)
-                                    RoundedRectangle(cornerRadius: 12).fill(surface).frame(width: 52, height: 62).overlay(RoundedRectangle(cornerRadius: 12).stroke(purple.opacity(0.26)))
-                                    Text("文").font(.system(size: 22, weight: .bold)).foregroundStyle(purple)
-                                    Image(systemName: "sparkle").font(.system(size: 12, weight: .bold)).foregroundStyle(violet).offset(x: 37, y: -29)
+                                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                        .fill(.thinMaterial)
+                                        .frame(width: 54, height: 54)
+                                        .macGlassBorder(cornerRadius: 13)
+                                    Image(systemName: "character.book.closed")
+                                        .font(.system(size: 21, weight: .regular))
+                                        .foregroundStyle(accent)
                                 }
                                 Text(model.hasImageTranslation ? "译文图片会显示在这里" : "译文会显示在这里")
-                                    .font(.system(size: 12)).foregroundStyle(ink)
+                                    .font(.system(size: 12)).foregroundStyle(MacVisualTokens.secondaryLabel)
                             }.frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
-                            ScrollView { Text(model.highlightedTranslatedText).font(.system(size: 17)).lineSpacing(7).foregroundStyle(ink).frame(maxWidth: .infinity, alignment: .topLeading).padding(27).textSelection(.enabled) }
+                            ScrollView { Text(model.highlightedTranslatedText).font(.system(size: 15)).lineSpacing(5).foregroundStyle(ink).frame(maxWidth: .infinity, alignment: .topLeading).padding(24).textSelection(.enabled) }
                         }
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .background(surface.opacity(0.55))
             }
             .frame(minHeight: 300, maxHeight: .infinity)
+            .background {
+                AdaptiveGlassBackdrop(materialOpacity: 0.96, tintOpacity: 0.18)
+            }
+            .overlay {
+                Rectangle()
+                    .stroke(glassEnabled
+                        ? AnyShapeStyle(LinearGradient(
+                            colors: [Color.white.opacity(effectiveDarkMode ? 0.40 : 0.94),
+                                     MacVisualTokens.separator.opacity(0.38),
+                                     Color.white.opacity(effectiveDarkMode ? 0.10 : 0.22)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                        : AnyShapeStyle(line),
+                        lineWidth: 0.8)
+                    .allowsHitTesting(false)
+            }
 
-            Divider().overlay(line)
+            Rectangle().fill(line).frame(height: 0.5)
 
             HStack(spacing: 12) {
                 HStack(spacing: 10) {
                     Button(action: model.toggleListening) {
-                        Label(model.isListening ? "停止录音" : "语音输入", systemImage: model.isListening ? "stop.circle.fill" : "mic.fill")
+                        Label(model.isListening ? "停止录音" : "语音输入", systemImage: model.isListening ? "stop.circle.fill" : "mic")
                     }
-                    .foregroundStyle(model.isListening ? Color.red : ink)
+                    .foregroundStyle(model.isListening ? Color(nsColor: .systemRed) : ink)
                     Divider().frame(height: 18)
                     Button(action: chooseImage) {
-                        Label("翻译图片", systemImage: "photo.badge.plus")
+                        Label("翻译图片", systemImage: "photo")
                     }
                     .disabled(model.isRecognizingImage || model.isCapturingRegion)
                     Divider().frame(height: 18)
@@ -5240,27 +5468,67 @@ private struct TranslatorView: View {
                     }
                     .disabled(model.sourceText.isEmpty && model.translatedText.isEmpty && !model.hasImageTranslation)
                 }
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .medium))
                 .buttonStyle(.borderless)
                 .foregroundStyle(ink)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button(action: model.translate) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: 12) {
                         Text(model.isLoading ? "翻译中" : (model.hasImageTranslation ? "重新翻译图片" : "开始翻译"))
                         Text("Enter")
-                            .font(.system(size: 10, weight: .semibold))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 4)
-                            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.75)))
+                            .font(.system(size: 9.5, weight: .medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(Color.white.opacity(0.42), lineWidth: 0.5))
                     }
-                        .frame(width: 190, height: 48)
-                        .foregroundStyle(.white)
-                        .background(LinearGradient(colors: [purple, violet], startPoint: .leading, endPoint: .trailing))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .shadow(color: purple.opacity(model.canTranslate ? 0.25 : 0), radius: 10, y: 6)
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 174, height: 40)
+                        .foregroundStyle(model.canTranslate ? Color.white : MacVisualTokens.secondaryLabel)
+                        .background {
+                            let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            ZStack {
+                                if glassEnabled {
+                                    shape.fill(.regularMaterial).opacity(0.94)
+                                }
+                                shape.fill(
+                                    model.canTranslate
+                                        ? (glassEnabled
+                                            ? AnyShapeStyle(LinearGradient(
+                                                colors: [accent.opacity(0.70),
+                                                         accent.opacity(0.44)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            ))
+                                            : AnyShapeStyle(accent))
+                                        : AnyShapeStyle(surface.opacity(effectiveDarkMode ? 0.30 : 0.46))
+                                )
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .stroke(glassEnabled
+                                    ? AnyShapeStyle(LinearGradient(
+                                        colors: [Color.white.opacity(model.canTranslate
+                                            ? (effectiveDarkMode ? 0.40 : 0.82)
+                                            : (effectiveDarkMode ? 0.20 : 0.38)),
+                                                 accent.opacity(model.canTranslate ? 0.34 : 0.10)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ))
+                                    : AnyShapeStyle(line),
+                                    lineWidth: 0.8)
+                        }
+                        .shadow(
+                            color: glassEnabled ? accent.opacity(model.canTranslate ? 0.18 : 0) : Color.clear,
+                            radius: glassEnabled ? 10 : 0,
+                            y: glassEnabled ? 4 : 0
+                        )
                 }
-                .buttonStyle(.plain).disabled(!model.canTranslate).opacity(model.canTranslate ? 1 : 0.45)
+                .buttonStyle(.plain).disabled(!model.canTranslate)
                 .keyboardShortcut(.return, modifiers: [])
 
                 HStack(spacing: 10) {
@@ -5312,17 +5580,28 @@ private struct TranslatorView: View {
                             Text(status).lineLimit(1)
                             Divider().frame(height: 18)
                         }
-                        Button {
-                            model.setOnlineVoiceGender(model.onlineVoiceGender == .female ? .male : .female)
+                        Menu {
+                            ForEach(OnlineVoicePersona.allCases) { persona in
+                                Button {
+                                    model.setOnlineVoicePersona(persona)
+                                } label: {
+                                    if model.onlineVoicePersona == persona {
+                                        Label(persona.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(persona.title)
+                                    }
+                                }
+                            }
                         } label: {
                             HStack(spacing: 5) {
-                                Image(systemName: model.onlineVoiceGender.icon)
-                                Text(model.onlineVoiceGender.title)
+                                Image(systemName: model.onlineVoicePersona.icon)
+                                Text(model.onlineVoicePersona.title)
                                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
                             }
                             .foregroundStyle(ink)
                         }
-                        .buttonStyle(.plain)
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
                         Divider().frame(height: 18)
                         Button(action: model.speakResult) {
                             Label(resultSpeechButtonTitle, systemImage: resultSpeechButtonIcon)
@@ -5335,17 +5614,36 @@ private struct TranslatorView: View {
                         .disabled(model.translatedText.isEmpty)
                     }
                 }
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .medium))
                 .buttonStyle(.borderless)
                 .foregroundStyle(ink)
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .padding(.horizontal, 24).frame(height: 72)
+            .padding(.horizontal, 20)
+            .frame(height: 64)
         }
-        .background(surface.opacity(0.92))
-        .clipShape(RoundedRectangle(cornerRadius: 22))
-        .overlay(RoundedRectangle(cornerRadius: 22).stroke(line))
-        .shadow(color: Color(red: 0.25, green: 0.25, blue: 0.50).opacity(0.10), radius: 30, y: 16)
+        .background {
+            AdaptiveGlassBackdrop(materialOpacity: 0.84, tintOpacity: 0.07, regular: false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: MacVisualTokens.panelRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: MacVisualTokens.panelRadius, style: .continuous)
+                .stroke(glassEnabled
+                    ? AnyShapeStyle(LinearGradient(
+                        colors: [Color.white.opacity(effectiveDarkMode ? 0.36 : 0.92),
+                                 Color.white.opacity(effectiveDarkMode ? 0.12 : 0.30),
+                                 MacVisualTokens.separator.opacity(0.46)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    : AnyShapeStyle(line),
+                    lineWidth: 0.9)
+        }
+        .shadow(
+            color: glassEnabled ? Color.black.opacity(effectiveDarkMode ? 0.20 : 0.10) : Color.black.opacity(0.05),
+            radius: glassEnabled ? 18 : 4,
+            y: glassEnabled ? 8 : 1
+        )
         .frame(maxWidth: 1120, maxHeight: .infinity)
     }
 
@@ -5406,7 +5704,6 @@ private struct TranslatorView: View {
         switch model.selectedEngine {
         case .apple: return "Apple 系统本机翻译"
         case .deepl: return "内容由 DeepL 在线处理"
-        case .myMemory: return "内容由 MyMemory 在线处理"
         }
     }
 

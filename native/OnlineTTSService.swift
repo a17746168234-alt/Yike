@@ -21,12 +21,22 @@ enum OnlineTTSError: LocalizedError {
     }
 }
 
-enum OnlineVoiceGender: String, CaseIterable {
+enum OnlineVoicePersona: String, CaseIterable, Identifiable {
     case female
     case male
 
-    var title: String { self == .female ? "女声" : "男声" }
-    var icon: String { self == .female ? "person.crop.circle" : "person.crop.circle.fill" }
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .female: return "女声"
+        case .male: return "男声"
+        }
+    }
+
+    var icon: String {
+        self == .female ? "person.crop.circle" : "person.crop.circle.fill"
+    }
 }
 
 final class OnlineTTSService {
@@ -41,14 +51,26 @@ final class OnlineTTSService {
         session = URLSession(configuration: configuration)
     }
 
-    static func voice(for language: String, gender: OnlineVoiceGender) -> String? {
-        let voices: [String: [OnlineVoiceGender: String]] = [
-            "en": [.female: "en-US-EmmaMultilingualNeural", .male: "en-US-AndrewMultilingualNeural"],
-            "zh-CN": [.female: "zh-CN-XiaoxiaoNeural", .male: "zh-CN-YunxiNeural"],
-            "ja": [.female: "ja-JP-NanamiNeural", .male: "ja-JP-KeitaNeural"],
-            "ko": [.female: "ko-KR-SunHiNeural", .male: "ko-KR-InJoonNeural"]
+    static func voice(for language: String, persona: OnlineVoicePersona) -> String? {
+        let voices: [String: [OnlineVoicePersona: String]] = [
+            "en": [
+                .female: "en-US-JennyNeural",
+                .male: "en-US-AndrewMultilingualNeural"
+            ],
+            "zh-CN": [
+                .female: "zh-CN-XiaoxiaoNeural",
+                .male: "zh-CN-YunxiNeural"
+            ],
+            "ja": [
+                .female: "ja-JP-NanamiNeural",
+                .male: "ja-JP-KeitaNeural"
+            ],
+            "ko": [
+                .female: "ko-KR-SunHiNeural",
+                .male: "ko-KR-InJoonNeural"
+            ]
         ]
-        return voices[language]?[gender]
+        return voices[language]?[persona]
     }
 
     static func cacheKey(text: String, language: String, voice: String, rate: String) -> String {
