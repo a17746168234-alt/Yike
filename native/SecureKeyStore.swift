@@ -80,13 +80,16 @@ enum KeychainStoreError: LocalizedError {
 }
 
 enum SecureKeyStore {
+    // Separate QA bundles must never read, migrate or overwrite the user's key.
+    static let applicationID = Bundle.main.bundleIdentifier ?? "com.yijian.translator.kimi"
     private static let store = KeychainTextStore(
-        service: "com.yijian.translator.kimi.deepl",
+        service: applicationID + ".deepl",
         account: "deepl-api-key"
     )
 
     private static var legacyKeyFileURL: URL? {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+        guard applicationID == "com.yijian.translator.kimi" else { return nil }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first?
             .appendingPathComponent("Mac翻译", isDirectory: true)
             .appendingPathComponent("deepl-api-key")

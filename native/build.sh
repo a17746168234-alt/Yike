@@ -20,10 +20,7 @@ output_file="$project_dir/outputs/Mac翻译-macOS-arm64.dmg"
 mkdir -p "$macos_dir" "$resources_dir" "$iconset_dir" "$dmg_root" "$project_dir/outputs"
 
 xcrun swiftc -O -target arm64-apple-macos13.0 -parse-as-library -module-name FanyiApp \
-  "$source_dir/TranslationCore.swift" \
-  "$source_dir/SecureKeyStore.swift" \
-  "$source_dir/MacTranslatorApp.swift" \
-  "$source_dir/OnlineTTSService.swift" \
+  "$source_dir/"*.swift \
   -o "$macos_dir/Translation" \
   -framework SwiftUI -framework AppKit -framework Foundation -framework Speech -framework AVFoundation -framework Translation -framework Security -framework Vision -framework NaturalLanguage -framework UniformTypeIdentifiers -framework ApplicationServices -framework Carbon
 
