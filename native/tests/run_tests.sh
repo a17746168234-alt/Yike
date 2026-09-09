@@ -11,6 +11,7 @@ export SWIFT_MODULE_CACHE_PATH="$test_work_dir/swift-module-cache"
 
 xcrun swiftc \
   "$project_dir/native/TranslationCore.swift" \
+  "$project_dir/native/SelectionShortcut.swift" \
   "$project_dir/native/SecureKeyStore.swift" \
   "$project_dir/native/tests/TranslationCoreTests.swift" \
   -framework Security \

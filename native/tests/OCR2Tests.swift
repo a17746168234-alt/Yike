@@ -1,6 +1,7 @@
 import AppKit
 import CoreImage
 import Foundation
+import Translation
 
 struct OCR2TestFailure: Error, CustomStringConvertible { let description: String }
 func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
@@ -24,6 +25,7 @@ struct OCR2Tests {
         try documentTests()
         try layoutTests()
         try await networkTests()
+        try await diagnosticTests()
         try fixtureTests(root)
         try renderingTests(root)
         print("OCR2Tests: document, layout, network and fixed-image regression suites passed")
@@ -135,6 +137,53 @@ struct OCR2Tests {
         let batchCount = await batchProbe.count
         try check(batched == many && batchCount == 3, "batch order or request bounds changed")
         print("PASS network: retry cap, cancellation, 85-region batch order, HTTP errors, response completeness, offline mapping (mock transport)")
+    }
+
+    @MainActor
+    static func diagnosticTests() async throws {
+        let dns = TranslationDiagnostic.explain(URLError(.cannotFindHost), engine: .deepl)
+        try check(dns.reason.contains("无法连接") && !dns.reason.contains("网络未连接"), "DNS failure must not claim offline")
+        let quota = TranslationDiagnostic.explain(TranslationFailure.quota, engine: .deepl)
+        try check(quota.technicalDetail == "HTTP 456" && quota.recovery.contains("账户"), "quota guidance missing")
+        let invalidKey = TranslationDiagnostic.explain(TranslationFailure.invalidKey, engine: .deepl)
+        try check(invalidKey.recovery.contains("API Free") && invalidKey.recovery.contains("网页版"), "key recovery must distinguish API from web subscription")
+        let badRequest = TranslationDiagnostic.explain(TranslationFailure.server(400), engine: .deepl)
+        try check(!badRequest.reason.contains("服务暂时发生异常"), "HTTP 400 must not be called a server outage")
+        let tooLarge = TranslationDiagnostic.explain(TranslationFailure.server(413), engine: .deepl)
+        try check(tooLarge.recovery.contains("分成"), "large request needs split guidance")
+        let unknown = TranslationDiagnostic.explain(NSError(domain: "ExampleUnknown", code: 73), engine: .apple)
+        try check(unknown.reason.contains("未提供可确定") && unknown.technicalDetail == "ExampleUnknown / 73", "unknown errors must preserve uncertainty and code")
+        let preparation = TranslationDiagnostic.explain(ApplePreparationFailure(underlying: NSError(domain: "ExamplePrepare", code: 9)), engine: .apple)
+        try check(preparation.reason.contains("语言包准备") && preparation.technicalDetail == "ExamplePrepare / 9", "preparation context lost")
+        let wrappedOffline = TranslationDiagnostic.explain(ApplePreparationFailure(underlying: URLError(.notConnectedToInternet)), engine: .apple)
+        try check(wrappedOffline.reason.contains("网络未连接"), "wrapped URL failure must retain classification")
+        if #available(macOS 15.0, *) {
+            for error in [TranslationError.unsupportedSourceLanguage, .unsupportedTargetLanguage, .unsupportedLanguagePairing] {
+                let issue = TranslationDiagnostic.explain(error, engine: .apple)
+                try check(issue.reason.contains("不支持") && issue.recovery.contains("手动"), "Apple unsupported language needs actionable guidance")
+            }
+            let language = TranslationDiagnostic.explain(TranslationError.unableToIdentifyLanguage, engine: .apple)
+            try check(language.recovery.contains("原文语言"), "language identification needs manual language instruction")
+            if #available(macOS 26.0, *) {
+                let missing = TranslationDiagnostic.explain(ApplePreparationFailure(underlying: TranslationError.notInstalled), engine: .apple)
+                try check(missing.reason.contains("尚未安装") && missing.recovery.contains("每台 Mac"), "missing model must explain per-machine download")
+                let cancelled = TranslationDiagnostic.explain(TranslationError.alreadyCancelled, engine: .apple)
+                try check(cancelled.recovery.contains("新会话"), "cancelled session guidance missing")
+            }
+        }
+        let watchdog = TranslationWatchdog()
+        var fired = 0
+        watchdog.arm(seconds: 0.01) { fired += 100 }
+        watchdog.cancel()
+        try await Task.sleep(for: .milliseconds(50))
+        try check(fired == 0, "cancelled watchdog must not overwrite results")
+        watchdog.arm(seconds: 1) { fired += 100 }
+        await withCheckedContinuation { continuation in
+            watchdog.arm(seconds: 0.01) { fired += 1; continuation.resume() }
+        }
+        watchdog.cancel()
+        try check(fired == 1, "rearming must replace earlier watchdog")
+        print("PASS diagnostics: Apple SDK errors, download context, DNS vs offline, HTTP guidance, unknown codes, watchdog cancellation/rearming")
     }
 
     static let fixtureNames = ["english", "chinese", "rotated", "skewed", "low-contrast", "blank"]

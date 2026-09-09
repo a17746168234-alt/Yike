@@ -75,7 +75,7 @@ struct TranslatorView: View {
                     .frame(maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 900, minHeight: 560)
+        .frame(minWidth: 934, minHeight: 560)
         .preferredColorScheme(preferredScheme)
         .onAppear {
             migrateAppearanceIfNeeded()
@@ -146,7 +146,7 @@ struct TranslatorView: View {
                     .frame(width: 38, height: 38)
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Mac翻译")
+                    Text("Yike")
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(ink)
                     Label(engineStatusText, systemImage: model.selectedEngine == .apple ? "desktopcomputer" : "checkmark.shield")
@@ -175,7 +175,7 @@ struct TranslatorView: View {
                     if let usage = model.deepLUsage {
                         Text("DeepL 用量：\(usage.characterCount) / \(usage.characterLimit) 字符（\(usage.usedPercentText)%）")
                     }
-                    Button(model.hasDeepLKey ? "更新 DeepL 密钥…" : "设置 DeepL 密钥…") {
+            Button(model.hasDeepLKey ? "更新 DeepL 密钥" : "设置 DeepL 密钥") {
                         showDeepLSettings = true
                     }
                 } label: {
@@ -207,58 +207,16 @@ struct TranslatorView: View {
                 }
                 .buttonStyle(.plain)
 
-                Menu {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Label("打开完整设置…", systemImage: "gearshape.2")
-                    }
-                    Divider()
-                    Menu {
-                        Button { appearanceMode = "system" } label: {
-                            Label("跟随系统", systemImage: appearanceMode == "system" ? "checkmark" : "circle")
-                        }
-                        Button { appearanceMode = "light" } label: {
-                            Label("浅色", systemImage: appearanceMode == "light" ? "checkmark" : "sun.max")
-                        }
-                        Button { appearanceMode = "dark" } label: {
-                            Label("深色", systemImage: appearanceMode == "dark" ? "checkmark" : "moon.fill")
-                        }
-                    } label: {
-                        Label("外观：\(appearanceModeLabel)", systemImage: "paintpalette")
-                    }
-                    Button {
-                        model.requestGlobalShortcutPermission()
-                    } label: {
-                        Label("划词翻译权限（\(globalShortcutDescription)）…", systemImage: "command")
-                    }
-                    Divider()
-                    Button {
-                        model.setHistoryRecording(!model.historyRecordingEnabled)
-                    } label: {
-                        Label("记录翻译历史", systemImage: model.historyRecordingEnabled ? "checkmark" : "")
-                    }
-                    Button {
-                        model.setImageHistoryRecording(!model.imageHistoryRecordingEnabled)
-                    } label: {
-                        Label("记录最近 10 张译图", systemImage: model.imageHistoryRecordingEnabled ? "checkmark" : "")
-                    }
-                    Divider()
-                    Button(role: .destructive) {
-                        NSApp.terminate(nil)
-                    } label: {
-                        Label("完全退出", systemImage: "power")
-                    }
-                } label: {
+                Button { showSettings = true } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(ink)
                         .macHoverControl(cornerRadius: 9, horizontalPadding: 0, height: 36)
                         .frame(width: 36)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
+                .buttonStyle(.plain)
+                .accessibilityLabel("设置")
+                .accessibilityIdentifier("openSettings")
                 .help("设置")
             }
         }
@@ -424,6 +382,30 @@ struct TranslatorView: View {
                                 Button("取消翻译", action: model.cancelTranslation)
                             }
                                 .font(.system(size: 12)).foregroundStyle(Color.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if let diagnostic = model.notice?.diagnostic {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 18) {
+                                    TranslationDiagnosticView(diagnostic: diagnostic)
+                                    HStack(spacing: 12) {
+                                        Button("重新尝试", action: model.translate)
+                                            .disabled(!model.canTranslate)
+                                        if diagnostic.engine == .deepl || !model.hasDeepLKey {
+                                            Button("设置 DeepL 密钥") { showDeepLSettings = true }
+                                        }
+                                    }
+                                    Button(model.selectedEngine == .apple ? "切换到 DeepL" : "切换到 Apple 翻译") {
+                                        if model.selectedEngine == .apple && !model.hasDeepLKey {
+                                            showDeepLSettings = true
+                                        } else {
+                                            model.setEngine(model.selectedEngine == .apple ? .deepl : .apple)
+                                            model.translate()
+                                        }
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .padding(24)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         } else if let notice = model.notice {
                             VStack(spacing: 12) {
                                 Image(systemName: notice.kind.icon)
@@ -469,7 +451,7 @@ struct TranslatorView: View {
                                     .font(.system(size: 12)).foregroundStyle(MacVisualTokens.secondaryLabel)
                             }.frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
-                            ScrollView { Text(model.highlightedTranslatedText).font(.system(size: 15)).lineSpacing(5).foregroundStyle(ink).frame(maxWidth: .infinity, alignment: .topLeading).padding(24).textSelection(.enabled) }
+                            ScrollView { TypewriterTranslationText(text: model.translatedText, highlightedText: model.highlightedTranslatedText, isSpeaking: model.isSpeakingResult).font(.system(size: 15)).lineSpacing(5).foregroundStyle(ink).frame(maxWidth: .infinity, alignment: .topLeading).padding(24).textSelection(.enabled) }
                         }
                     }
                 }

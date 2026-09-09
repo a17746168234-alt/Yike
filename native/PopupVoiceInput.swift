@@ -1,0 +1,104 @@
+import Foundation
+import Speech
+import AVFoundation
+
+@MainActor
+final class PopupVoiceInput {
+    private let engine = AVAudioEngine()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var recognition: SFSpeechRecognitionTask?
+    private var timeout: Task<Void, Never>?
+    private var session: UUID?
+    private var hasTap = false
+    private var completion: ((String?) -> Void)?
+
+    func start(onText: @escaping (String) -> Void, onFinish: @escaping (String?) -> Void) {
+        cancel()
+        let id = UUID()
+        session = id
+        completion = onFinish
+        Task {
+            let status = await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+            }
+            guard session == id else { return }
+            guard status == .authorized else {
+                finish(error: "请在系统设置 → 隐私与安全性 → 语音识别中允许 Yike")
+                return
+            }
+            let permitted = await AVCaptureDevice.requestAccess(for: .audio)
+            guard session == id else { return }
+            guard permitted else {
+                finish(error: "请在系统设置 → 隐私与安全性 → 麦克风中允许 Yike")
+                return
+            }
+            guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN")), recognizer.isAvailable else {
+                finish(error: "中文语音识别暂不可用，请稍后重试")
+                return
+            }
+            let audioRequest = SFSpeechAudioBufferRecognitionRequest()
+            audioRequest.shouldReportPartialResults = true
+            request = audioRequest
+            let input = engine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            guard format.sampleRate > 0, format.channelCount > 0 else {
+                finish(error: "没有可用的麦克风")
+                return
+            }
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                audioRequest.append(buffer)
+            }
+            hasTap = true
+            do {
+                engine.prepare()
+                try engine.start()
+            } catch {
+                finish(error: "无法启动麦克风，请稍后重试")
+                return
+            }
+            scheduleStop(after: 8, id: id)
+            recognition = recognizer.recognitionTask(with: audioRequest) { [weak self] result, error in
+                Task { @MainActor in
+                    guard let self, self.session == id else { return }
+                    if let result {
+                        let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+                        onText(text)
+                        if result.isFinal { self.finish(); return }
+                        self.scheduleStop(after: 2, id: id)
+                    }
+                    if error != nil { self.finish(error: "语音识别中断，请重新尝试") }
+                }
+            }
+        }
+    }
+
+    private func scheduleStop(after seconds: UInt64, id: UUID) {
+        timeout?.cancel()
+        timeout = Task {
+            do { try await Task.sleep(nanoseconds: seconds * 1_000_000_000) }
+            catch { return }
+            guard session == id else { return }
+            finish()
+        }
+    }
+
+    func finish(error: String? = nil) {
+        guard session != nil else { return }
+        let callback = completion
+        cancel()
+        callback?(error)
+    }
+
+    func cancel() {
+        session = nil
+        timeout?.cancel()
+        timeout = nil
+        engine.stop()
+        if hasTap { engine.inputNode.removeTap(onBus: 0); hasTap = false }
+        request?.endAudio()
+        recognition?.cancel()
+        request = nil
+        recognition = nil
+        completion = nil
+    }
+}

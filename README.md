@@ -1,4 +1,4 @@
-# Mac翻译
+# Yike
 
 macOS 原生翻译应用，支持中文、英文、日文和韩文。
 基于早期 Codex 版「翻译」工程二次开发，Bundle ID 为 `com.yijian.translator.kimi`。
@@ -21,7 +21,8 @@ macOS 原生翻译应用，支持中文、英文、日文和韩文。
 14. 构建开启 `-O` 优化编译
 15. **OCR 2.0**：保留每个区域置信度和最多 3 个 Vision 候选；导入前自动尝试四向旋转、轻微纠偏和低对比增强；OCR 编辑器支持补框、拆分、合并和低置信度复核；长译文按 CoreText 实测可见范围自动缩小字号
 16. **翻译故障可解释性**：Apple 显示语言包已安装 / 需要下载 / 暂不可用；DeepL 区分断网、超时、密钥、额度、限流和服务端错误；超时只安全重试一次；图片失败保留 OCR，可换引擎重试
-17. **工程稳定性**：钥匙串与翻译核心已从主文件拆分；文字和图片翻译使用请求 ID 拒绝过期结果；加入钥匙串、请求竞态、OCR 文档操作、固定图集和最终译图排版自动化测试
+17. **翻译失败指导（Build 60）**：右侧译文区和划词浮窗显示失败原因、解决方法及可用错误代码；区分 Apple 语言包/语言支持、DeepL 密钥/额度/限流、网络和未知错误；Apple 会话长时间无响应时给出提示，保留原文和识别文字。
+18. **工程稳定性**：钥匙串与翻译核心已从主文件拆分；文字和图片翻译使用请求 ID 拒绝过期结果；加入钥匙串、请求竞态、OCR 文档操作、固定图集和最终译图排版自动化测试
 
 ## 原有功能
 
@@ -34,25 +35,31 @@ macOS 原生翻译应用，支持中文、英文、日文和韩文。
 
 ## 安装
 
-打开 `outputs/Mac翻译-macOS-arm64.dmg`，将「Mac翻译」拖入 Applications。
+从 [最新发布版本](https://github.com/a17746168234-alt/Yike/releases/latest) 下载 macOS 安装包。
+
+打开 `outputs/Yike-macOS-arm64.dmg`，将「Yike」拖入 Applications。
+
+当前安装包为 **1.6（Build 60），Apple Silicon / arm64**。Apple 翻译需要 **macOS 15 或以上**，每台 Mac 首次使用需联网确认并下载对应语言包；安装包不包含语言包或 DeepL 密钥。本应用的 Apple 翻译不支持 Windows。DeepL 需要用户自行设置 API Free 密钥。
+
+翻译失败后，在右侧“原因 / 解决方法”处查看提示，再选择重试、设置密钥或切换引擎。无法确定的系统错误会明确标注未知原因并提供错误代码，不会将所有失败误报为断网。
 
 ## 构建
 
 在项目根目录运行：
 
 ```bash
-./native/build.sh
+bash native/build.sh
 ```
 
 构建产物：
 
-- `outputs/Mac翻译-macOS-arm64.dmg`（安装包）
+- `outputs/Yike-macOS-arm64.dmg`（安装包）
 
 ## 自动化测试
 
 ```bash
-./native/tests/run_tests.sh
-./native/tests/run_ocr_tests.sh
+bash native/tests/run_tests.sh
+bash native/tests/run_ocr_tests.sh
 ```
 
 基础测试覆盖系统钥匙串读写与删除、旧翻译请求失效和长文本分段。

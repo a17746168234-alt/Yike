@@ -165,6 +165,11 @@ struct AppNotice {
     let kind: NoticeKind
     let message: String
     var action: NoticeAction? = nil
+    var diagnostic: TranslationDiagnostic? = nil
+
+    static func translation(_ diagnostic: TranslationDiagnostic) -> Self {
+        Self(kind: .error, message: diagnostic.message, diagnostic: diagnostic)
+    }
 }
 
 struct DeepLUsagePayload: Decodable {

@@ -33,9 +33,24 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     @Published var history: [TranslationHistory] = []
     @Published private(set) var imageHistory: [ImageTranslationHistory] = []
     @Published var selectedEngine: TranslationEngine = .apple
-    @Published var appleTranslationRequest: AppleTranslationRequest?
-    @Published var appleImageTranslationRequest: AppleImageTranslationRequest?
-    @Published private(set) var popupAppleTranslationRequest: PopupAppleTranslationRequest?
+    @Published var appleTranslationRequest: AppleTranslationRequest? {
+        didSet {
+            if let request = appleTranslationRequest { armAppleWatchdog(id: request.id) }
+            else if appleImageTranslationRequest == nil { appleWatchdog.cancel() }
+        }
+    }
+    @Published var appleImageTranslationRequest: AppleImageTranslationRequest? {
+        didSet {
+            if let request = appleImageTranslationRequest { armAppleWatchdog(id: request.id) }
+            else if appleTranslationRequest == nil { appleWatchdog.cancel() }
+        }
+    }
+    @Published private(set) var popupAppleTranslationRequest: PopupAppleTranslationRequest? {
+        didSet {
+            if let request = popupAppleTranslationRequest { armAppleWatchdog(id: request.id, popup: true) }
+            else { popupAppleWatchdog.cancel() }
+        }
+    }
     @Published private(set) var popupSourceText = ""
     @Published private(set) var popupTranslatedText = ""
     @Published private(set) var popupSourceLanguage = "en"
@@ -84,6 +99,8 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     private var speechHighlightTask: Task<Void, Never>?
     private var speechAudioURL: URL?
     private var speechPreloadTask: Task<URL?, Never>?
+    private let appleWatchdog = TranslationWatchdog()
+    private let popupAppleWatchdog = TranslationWatchdog()
     private var translationTask: Task<Void, Never>?
     private var translationRequestGate = TranslationRequestGate()
     private var imageTranslationTask: Task<Void, Never>?
@@ -155,6 +172,29 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         refreshSpeechCacheSize()
     }
 
+    private func armAppleWatchdog(id: UUID, popup: Bool = false, seconds: Double = 45, stage: String = "启动系统翻译") {
+        let watchdog = popup ? popupAppleWatchdog : appleWatchdog
+        watchdog.arm(seconds: seconds) { [weak self] in
+            guard let self else { return }
+            if popup {
+                guard self.popupAppleTranslationRequest?.id == id else { return }
+                self.popupAppleTranslationRequest = nil
+                self.popupIsLoading = false
+                self.popupNotice = .translation(.stalled(stage: stage))
+            } else {
+                guard self.appleTranslationRequest?.id == id || self.appleImageTranslationRequest?.id == id else { return }
+                self.translationRequestGate.cancel()
+                self.imageRequestGate.cancel()
+                self.appleTranslationRequest = nil
+                self.appleImageTranslationRequest = nil
+                self.isLoading = false
+                self.notice = .translation(.stalled(stage: stage))
+            }
+        }
+    }
+
+    func retryPopupTranslation() { translatePopup() }
+
     private func setError(_ message: String, action: NoticeAction? = nil) {
         notice = AppNotice(kind: .error, message: message, action: action)
     }
@@ -197,7 +237,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         copySelectedTextFromFrontmostApp { [weak self] selectedText in
             guard let self else { return }
             guard let selectedText, !selectedText.isEmpty else {
-                self.showGlobalShortcutError("没有读取到选中的文字。请确认已选中文字；如果刚打开辅助功能权限，请完全退出“Mac翻译”后重新打开")
+                self.showGlobalShortcutError("没有读取到选中的文字。请确认已选中文字；如果刚打开辅助功能权限，请完全退出“Yike”后重新打开")
                 return
             }
             self.useSelectedTextAndTranslate(selectedText, anchor: NSEvent.mouseLocation, sourceProcessID: processID)
@@ -209,7 +249,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         if AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary) {
             setSuccess("划词翻译已可使用：选中文字后按 \(globalShortcutDescription)")
         } else {
-            setInfo("请在系统设置 → 隐私与安全性 → 辅助功能中允许“Mac翻译”", action: .openAccessibilitySettings)
+            setInfo("请在系统设置 → 隐私与安全性 → 辅助功能中允许“Yike”", action: .openAccessibilitySettings)
         }
     }
 
@@ -313,6 +353,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     }
 
     private func useSelectedTextAndTranslate(_ text: String, anchor: CGPoint, sourceProcessID: pid_t) {
+        cancelPopupVoiceInput()
         let limitedText = String(text.prefix(maxSourceCharacters))
         popupSourceText = limitedText
         popupSourceLanguage = detectSupportedLanguage(in: limitedText)
@@ -357,6 +398,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         popupTranslatedText = ""
         popupNotice = nil
         popupIsLoading = true
+        popupTranslationProgress = "正在检查翻译服务…"
 
         let source = popupSourceLanguage
         let target = popupTargetLanguage
@@ -375,12 +417,12 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 popupAppleTranslationRequest = request
             } else {
                 popupIsLoading = false
-                popupNotice = AppNotice(kind: .error, message: "Apple 系统翻译需要 macOS 15 或更高版本")
+                popupNotice = .translation(.appleSystemRequired)
             }
         case .deepl:
             guard hasDeepLKey else {
                 popupIsLoading = false
-                popupNotice = AppNotice(kind: .error, message: "请先在主窗口设置 DeepL API Free 密钥")
+                popupNotice = .translation(.missingDeepLKey)
                 return
             }
             popupTranslationTask = Task { [weak self] in
@@ -398,7 +440,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                     Task { await self.fetchDeepLUsage() }
                 } catch {
                     guard !Task.isCancelled else { return }
-                    self.showPopupTranslationError(error)
+                    self.showPopupTranslationError(error, engine: .deepl)
                 }
             }
         }
@@ -409,9 +451,13 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         guard popupAppleTranslationRequest?.id == request.id else { return }
         do {
             try await AppleLanguagePreparation.prepare(session, source: request.source, target: request.target) { status in
-                if self.popupAppleTranslationRequest?.id == request.id { self.popupTranslationProgress = status }
+                if self.popupAppleTranslationRequest?.id == request.id {
+                    self.popupTranslationProgress = status
+                    self.armAppleWatchdog(id: request.id, popup: true, seconds: 300, stage: "准备语言包")
+                }
             }
             guard popupAppleTranslationRequest?.id == request.id else { return }
+            armAppleWatchdog(id: request.id, popup: true, seconds: 90, stage: "翻译文字")
             let response = try await session.translate(request.text)
             guard popupAppleTranslationRequest?.id == request.id else { return }
             finishPopupTranslation(
@@ -423,7 +469,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             )
         } catch {
             guard popupAppleTranslationRequest?.id == request.id else { return }
-            showPopupTranslationError(error)
+            showPopupTranslationError(error, engine: .apple)
         }
     }
 
@@ -442,15 +488,11 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         saveHistory(original: original, result: popupTranslatedText, source: source, target: target)
     }
 
-    private func showPopupTranslationError(_ error: Error) {
+    private func showPopupTranslationError(_ error: Error, engine: TranslationDiagnostic.Engine) {
         popupTranslationTask = nil
         popupAppleTranslationRequest = nil
         popupIsLoading = false
-        if let known = error as? AppTranslationError {
-            popupNotice = AppNotice(kind: .error, message: known.localizedDescription)
-        } else {
-            popupNotice = AppNotice(kind: .error, message: TranslationFailure.message(for: error))
-        }
+        popupNotice = .translation(.explain(error, engine: engine))
     }
 
     func setEngine(_ engine: TranslationEngine) {
@@ -826,8 +868,13 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         let cleanText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanText.isEmpty, !isLoading else { return }
 
+        let effectiveSource = sourceLanguage == "auto" ? detectSupportedLanguage(in: cleanText) : sourceLanguage
+        if sourceLanguage == "auto" {
+            if effectiveSource == "en" { targetLanguage = "zh-CN" }
+            else if effectiveSource == "zh-CN" { targetLanguage = "en" }
+        }
+
         if sourceImage != nil, !recognizedImageBlocks.isEmpty {
-            let effectiveSource = sourceLanguage == "auto" ? detectSupportedLanguage(in: cleanText) : sourceLanguage
             beginImageTranslation(source: effectiveSource, target: targetLanguage)
             return
         }
@@ -838,7 +885,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         notice = nil
         appleImageTranslationRequest = nil
 
-        let effectiveSource = sourceLanguage == "auto" ? detectSupportedLanguage(in: cleanText) : sourceLanguage
+        translatedText = ""
         let prepared = glossaryPreparedText(cleanText, source: effectiveSource, target: targetLanguage)
         let target = targetLanguage
         translationTask?.cancel()
@@ -859,13 +906,13 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             } else {
                 translationRequestGate.cancel()
                 isLoading = false
-                setError("Apple 系统翻译需要 macOS 15 或更高版本，请改用 DeepL")
+                notice = .translation(.appleSystemRequired)
             }
         case .deepl:
             guard hasDeepLKey else {
                 translationRequestGate.cancel()
                 isLoading = false
-                setError("请先设置 DeepL API Free 密钥")
+                notice = .translation(.missingDeepLKey)
                 return
             }
             translationTask = Task { [weak self] in
@@ -887,9 +934,13 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
               translationRequestGate.accepts(request.id) else { return }
         do {
             try await AppleLanguagePreparation.prepare(session, source: request.source, target: request.target) { status in
-                if self.appleTranslationRequest?.id == request.id { self.translationProgress = status }
+                if self.appleTranslationRequest?.id == request.id {
+                    self.translationProgress = status
+                    self.armAppleWatchdog(id: request.id, seconds: 300, stage: "准备语言包")
+                }
             }
             guard appleTranslationRequest?.id == request.id else { return }
+            armAppleWatchdog(id: request.id, seconds: 90, stage: "翻译文字")
             let response = try await session.translate(request.text)
             guard appleTranslationRequest?.id == request.id,
                   translationRequestGate.accepts(request.id) else { return }
@@ -911,7 +962,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             translationTask = nil
             appleTranslationRequest = nil
             isLoading = false
-            setError("Apple 翻译：\(TranslationFailure.message(for: error))")
+            notice = .translation(.explain(error, engine: .apple))
         }
     }
 
@@ -938,12 +989,12 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 appleImageTranslationRequest = request
             } else {
                 isLoading = false
-                setError("Apple 系统翻译需要 macOS 15 或更高版本，请改用 DeepL")
+                notice = .translation(.appleSystemRequired)
             }
         case .deepl:
             guard hasDeepLKey else {
                 isLoading = false
-                setError("请先设置 DeepL API Free 密钥")
+                notice = .translation(.missingDeepLKey)
                 return
             }
             let blocks = recognizedImageBlocks
@@ -960,7 +1011,10 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         guard appleImageTranslationRequest?.id == request.id, let sourceImage else { return }
         do {
             try await AppleLanguagePreparation.prepare(session, source: request.source, target: request.target) { status in
-                if self.appleImageTranslationRequest?.id == request.id { self.translationProgress = status }
+                if self.appleImageTranslationRequest?.id == request.id {
+                    self.translationProgress = status
+                    self.armAppleWatchdog(id: request.id, seconds: 300, stage: "准备语言包")
+                }
             }
             guard appleImageTranslationRequest?.id == request.id else { return }
             var translations: [String] = []
@@ -968,6 +1022,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             for (index, block) in request.blocks.enumerated() {
                 translationProgress = "正在翻译图片：\(index + 1) / \(request.blocks.count) 处"
                 let prepared = glossaryPreparedText(block.text, source: request.source, target: request.target)
+                armAppleWatchdog(id: request.id, seconds: 90, stage: "翻译图片文字")
                 let response = try await session.translate(prepared.0)
                 guard appleImageTranslationRequest?.id == request.id else { return }
                 translations.append(restoreGlossary(in: response.targetText, replacements: prepared.1))
@@ -986,7 +1041,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             appleImageTranslationRequest = nil
             imageTranslationTask = nil
             isLoading = false
-            setError("Apple 图片翻译：\(TranslationFailure.message(for: error))")
+            notice = .translation(.explain(error, engine: .apple))
         }
     }
 
@@ -1188,11 +1243,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     }
 
     private func showTranslationError(_ error: Error) {
-        if let known = error as? AppTranslationError {
-            setError(known.localizedDescription)
-        } else {
-            setError(TranslationFailure.message(for: error))
-        }
+        notice = .translation(.explain(error, engine: .deepl))
     }
 
     private func acceptTranslation(
@@ -1583,7 +1634,45 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         fallbackSpeechSynthesizer.speak(utterance)
     }
 
+    @Published private(set) var popupVoiceActive = false
+    private let popupVoiceInput = PopupVoiceInput()
+
+    func startPopupVoiceInput() {
+        if isListening { stopListening() }
+        popupTranslationTask?.cancel()
+        popupAppleTranslationRequest = nil
+        popupIsLoading = false
+        popupSourceText = ""
+        popupTranslatedText = ""
+        popupSourceLanguage = "zh-CN"
+        popupTargetLanguage = "en"
+        popupNotice = nil
+        popupVoiceActive = true
+        selectionPanelController.show(model: self, anchor: NSEvent.mouseLocation, sourceProcessID: nil)
+        popupVoiceInput.start(onText: { [weak self] text in
+            self?.popupSourceText = String(text.prefix(maxSourceCharacters))
+        }, onFinish: { [weak self] error in
+            guard let self else { return }
+            self.popupVoiceActive = false
+            if let error {
+                self.popupNotice = AppNotice(kind: .error, message: error)
+            } else if !self.popupSourceText.isEmpty {
+                self.translatePopup()
+            } else {
+                self.popupNotice = AppNotice(kind: .info, message: "没有听到语音，请从菜单栏重新开始")
+            }
+        })
+    }
+
+    func finishPopupVoiceInput() { popupVoiceInput.finish() }
+
+    func cancelPopupVoiceInput() {
+        popupVoiceInput.cancel()
+        popupVoiceActive = false
+    }
+
     func toggleListening() {
+        cancelPopupVoiceInput()
         if isListening {
             stopListening()
             return
@@ -1592,13 +1681,13 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         Task {
             let speechStatus = await requestSpeechAuthorization()
             guard speechStatus == .authorized else {
-                setError("请在系统设置中允许“Mac翻译”使用语音识别", action: .openSpeechRecognitionSettings)
+                setError("请在系统设置中允许“Yike”使用语音识别", action: .openSpeechRecognitionSettings)
                 return
             }
 
             let microphoneAllowed = await AVCaptureDevice.requestAccess(for: .audio)
             guard microphoneAllowed else {
-                setError("请在系统设置中允许“Mac翻译”使用麦克风", action: .openMicrophoneSettings)
+                setError("请在系统设置中允许“Yike”使用麦克风", action: .openMicrophoneSettings)
                 return
             }
 

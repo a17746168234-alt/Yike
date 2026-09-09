@@ -8,14 +8,14 @@ build_dir="$(mktemp -d "$project_dir/work/translation-native.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 export CLANG_MODULE_CACHE_PATH="$build_dir/clang-module-cache"
 export SWIFT_MODULE_CACHE_PATH="$build_dir/swift-module-cache"
-app_dir="$build_dir/Mac翻译.app"
+app_dir="$build_dir/Yike.app"
 contents_dir="$app_dir/Contents"
 macos_dir="$contents_dir/MacOS"
 resources_dir="$contents_dir/Resources"
 asset_catalog_dir="$build_dir/AppAssets.xcassets"
 iconset_dir="$asset_catalog_dir/AppIcon.appiconset"
 dmg_root="$build_dir/dmg-root"
-output_file="$project_dir/outputs/Mac翻译-macOS-arm64.dmg"
+output_file="$project_dir/outputs/Yike-macOS-arm64.dmg"
 
 mkdir -p "$macos_dir" "$resources_dir" "$iconset_dir" "$dmg_root" "$project_dir/outputs"
 
@@ -54,8 +54,8 @@ codesign --force --deep --sign - \
   "$app_dir" >/dev/null
 codesign --verify --deep --strict "$app_dir"
 
-ditto "$app_dir" "$dmg_root/Mac翻译.app"
+ditto "$app_dir" "$dmg_root/Yike.app"
 ln -s /Applications "$dmg_root/Applications"
-hdiutil create -volname "Mac翻译安装" -srcfolder "$dmg_root" -ov -format UDZO "$output_file" >/dev/null
+hdiutil create -volname "Yike安装" -srcfolder "$dmg_root" -ov -format UDZO "$output_file" >/dev/null
 
 echo "$output_file"

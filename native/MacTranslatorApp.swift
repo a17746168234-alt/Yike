@@ -10,10 +10,11 @@ import ApplicationServices
 import Carbon.HIToolbox
 
 let maxSourceCharacters = 5_000
-let globalShortcutDescription = "⇧⌘F"
+var globalShortcutDescription: String { SelectionShortcut.load().label }
 
 extension Notification.Name {
     static let translateSelectedText = Notification.Name("translateSelectedText")
+    static let selectionShortcutChanged = Notification.Name("selectionShortcutChanged")
 }
 
 struct SelectedTextCapture {
@@ -22,6 +23,8 @@ struct SelectedTextCapture {
 }
 
 final class GlobalHotKeyController {
+    static weak var active: GlobalHotKeyController?
+    private var currentShortcut: SelectionShortcut?
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
 
@@ -61,15 +64,27 @@ final class GlobalHotKeyController {
             &eventHandlerRef
         )
 
-        let hotKeyID = EventHotKeyID(signature: 0x46594E59, id: 1) // FYNY
-        RegisterEventHotKey(
-            UInt32(kVK_ANSI_F),
-            UInt32(cmdKey | shiftKey),
-            hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRef
+        Self.active = self
+        _ = apply(SelectionShortcut.load())
+    }
+
+    @discardableResult
+    func apply(_ value: SelectionShortcut) -> OSStatus {
+        guard value.validationError == nil else { return OSStatus(paramErr) }
+        if currentShortcut == value && hotKeyRef != nil { return noErr }
+        var replacement: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            value.keyCode, value.modifiers,
+            EventHotKeyID(signature: 0x46594E59, id: 1),
+            GetApplicationEventTarget(), 0, &replacement
         )
+        guard status == noErr else { return status }
+        if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
+        hotKeyRef = replacement
+        currentShortcut = value
+        value.save()
+        NotificationCenter.default.post(name: .selectionShortcutChanged, object: nil)
+        return noErr
     }
 
     deinit {
@@ -87,6 +102,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard claimSingleRunningInstance() else { return }
         globalHotKeyController = GlobalHotKeyController()
         configureStatusItem()
+        NotificationCenter.default.addObserver(self, selector: #selector(refreshShortcutLabels),
+                                               name: .selectionShortcutChanged, object: nil)
         DispatchQueue.main.async { [weak self] in
             self?.captureMainWindow()
         }
@@ -133,6 +150,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.toolbarStyle = .unified
         window.isMovableByWindowBackground = true
+        window.minSize = NSSize(width: 934, height: 592)
+        window.collectionBehavior.insert(.fullScreenPrimary)
         NSApp.setActivationPolicy(.regular)
     }
 
@@ -148,22 +167,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func configureStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "character.book.closed", accessibilityDescription: "Mac翻译")
-            button.toolTip = "Mac翻译 · \(globalShortcutDescription) 划词翻译"
+            button.image = MenuBarIcon.make()
+            button.toolTip = "Yike · \(globalShortcutDescription) 划词翻译"
         }
         let menu = NSMenu()
-        let openItem = NSMenuItem(title: "打开 Mac翻译", action: #selector(showMainWindow), keyEquivalent: "")
+        let openItem = NSMenuItem(title: "打开 Yike", action: #selector(showMainWindow), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
+        let screenshotItem = NSMenuItem(title: "截图翻译", action: #selector(translateScreenshot), keyEquivalent: "")
+        screenshotItem.target = self
+        menu.addItem(screenshotItem)
+        let voiceItem = NSMenuItem(title: "语音输入", action: #selector(translateVoice), keyEquivalent: "")
+        voiceItem.target = self
+        menu.addItem(voiceItem)
         let shortcutItem = NSMenuItem(title: "划词翻译：\(globalShortcutDescription)", action: nil, keyEquivalent: "")
         shortcutItem.isEnabled = false
+        shortcutItem.tag = 1001
         menu.addItem(shortcutItem)
         menu.addItem(.separator())
-        let quitItem = NSMenuItem(title: "退出 Mac翻译", action: #selector(quitApplication), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "退出 Yike", action: #selector(quitApplication), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
         item.menu = menu
         statusItem = item
+    }
+
+    @objc private func refreshShortcutLabels() {
+        statusItem?.button?.toolTip = "Yike · \(globalShortcutDescription) 划词翻译"
+        statusItem?.menu?.item(withTag: 1001)?.title = "划词翻译：\(globalShortcutDescription)"
+    }
+
+    @MainActor @objc private func translateScreenshot() {
+        showMainWindow()
+        TranslatorViewModel.shared.captureScreenRegionAndTranslate()
+    }
+
+    @MainActor @objc private func translateVoice() {
+        TranslatorViewModel.shared.startPopupVoiceInput()
     }
 
     @objc private func showMainWindow() {
@@ -246,7 +286,7 @@ struct TranslationApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Window("Mac翻译", id: "main") {
+        Window("Yike", id: "main") {
             TranslatorView()
         }
         .windowStyle(.hiddenTitleBar)

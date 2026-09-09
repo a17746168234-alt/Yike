@@ -405,9 +405,10 @@ struct DeepLSettingsSheet: View {
                 }
             }
 
-            Text("使用 DeepL API Free 账号中的密钥；免费版每月有 50 万字符额度。")
+            Divider()
+            Text("打开设置 → DeepL 密钥与帮助，可查看详细申请教程。")
                 .font(.system(size: 12))
-                .foregroundStyle(Color.secondary)
+                .foregroundStyle(.secondary)
 
             HStack {
                 if model.hasDeepLKey {
@@ -432,7 +433,7 @@ struct DeepLSettingsSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 500)
+        .frame(width: 540)
         .background {
             AdaptiveGlassBackdrop(materialOpacity: 0.92, tintOpacity: 0.24)
                 .ignoresSafeArea()

@@ -114,7 +114,11 @@ enum AppleLanguagePreparation {
         @unknown default: status("正在检查 Apple 语言包…")
         }
         // The public API exposes completion, not byte or percentage progress.
-        try await session.prepareTranslation()
+        do {
+            try await session.prepareTranslation()
+        } catch {
+            throw ApplePreparationFailure(underlying: error)
+        }
         try Task.checkCancellation()
         status("语言包已就绪，正在翻译…")
     }

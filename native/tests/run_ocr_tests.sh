@@ -6,7 +6,7 @@ mkdir -p "$test_dir"
 xcrun swiftc -parse-as-library -module-cache-path "$test_dir/module-cache" \
   "$project_dir/native/TranslationCore.swift" "$project_dir/native/ImageModels.swift" \
   "$project_dir/native/OCRDocument.swift" "$project_dir/native/OCRService.swift" \
-  "$project_dir/native/TextLayout.swift" "$project_dir/native/ImageRenderer.swift" "$project_dir/native/TranslationService.swift" \
+  "$project_dir/native/TextLayout.swift" "$project_dir/native/ImageRenderer.swift" "$project_dir/native/TranslationService.swift" "$project_dir/native/TranslationDiagnostics.swift" \
   "$project_dir/native/tests/OCR2Tests.swift" \
   -o "$test_dir/OCR2Tests"
 if [[ "${1:-}" != "--compile-only" ]]; then

@@ -1,4 +1,5 @@
 import Foundation
+import Carbon.HIToolbox
 
 private struct TestFailure: Error, CustomStringConvertible {
     let description: String
@@ -15,7 +16,26 @@ struct TranslationCoreTests {
         try testRequestGateRejectsStaleResults()
         try testImageZoomPolicy()
         try testKeychainRoundTrip()
-        print("TranslationCoreTests: 4 tests passed")
+        try testSelectionShortcut()
+        print("TranslationCoreTests: 5 tests passed")
+    }
+
+    private static func testSelectionShortcut() throws {
+        let suite = "yike.shortcut.tests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        try expect(SelectionShortcut.load(from: defaults) == .defaultValue, "未设置时应使用默认快捷键")
+        let custom = SelectionShortcut(keyCode: 5, modifiers: UInt32(controlKey | optionKey))
+        custom.save(to: defaults)
+        try expect(SelectionShortcut.load(from: defaults) == custom, "快捷键应能持久保存并恢复")
+        try expect(custom.label == "⌃⌥G", "描述应对应已保存的组合")
+        let invalid = SelectionShortcut(keyCode: 5, modifiers: UInt32(shiftKey))
+        try expect(invalid.validationError != nil, "应拒绝会影响普通输入的组合")
+        invalid.save(to: defaults)
+        try expect(SelectionShortcut.load(from: defaults) == custom, "无效组合不能覆盖原设置")
+        try expect(SelectionShortcut(keyCode: 12, modifiers: UInt32(cmdKey)).validationError != nil, "不能占用退出快捷键")
+        defaults.set(Data("invalid".utf8), forKey: SelectionShortcut.storageKey)
+        try expect(SelectionShortcut.load(from: defaults) == .defaultValue, "损坏数据应回退默认值")
     }
 
     private static func testTextChunking() throws {

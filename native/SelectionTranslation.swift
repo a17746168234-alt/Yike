@@ -51,6 +51,7 @@ final class SelectionTranslationPanelController: NSObject, NSWindowDelegate {
     }
 
     private func close() {
+        model?.cancelPopupVoiceInput()
         sourceProcessID = nil
         panel?.orderOut(nil)
         if let sourceAppObserver {
@@ -263,12 +264,30 @@ struct SelectionTranslationPopup: View {
                     .foregroundStyle(Color.secondary)
                     .lineLimit(2)
 
-                if model.popupIsLoading {
+                if model.popupVoiceActive {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("正在听，请说中文…", systemImage: "mic.fill")
+                        Button("完成并翻译", action: model.finishPopupVoiceInput)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else if model.popupIsLoading {
                     HStack(spacing: 10) {
                         ProgressView().controlSize(.small)
                         Text(model.popupTranslationProgress).font(.system(size: 14, weight: .medium))
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else if let diagnostic = model.popupNotice?.diagnostic {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            TranslationDiagnosticView(diagnostic: diagnostic)
+                            Button("重新尝试", action: model.retryPopupTranslation)
+                                .buttonStyle(.bordered)
+                            Text("需要设置密钥或切换引擎时，请打开 Yike 主窗口。")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
                 } else if let notice = model.popupNotice {
                     VStack(alignment: .leading, spacing: 8) {
                         Label(notice.kind.title, systemImage: notice.kind.icon)
