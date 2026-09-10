@@ -19,6 +19,10 @@ output_file="$project_dir/outputs/Yike-macOS-arm64.dmg"
 
 mkdir -p "$macos_dir" "$resources_dir" "$iconset_dir" "$dmg_root" "$project_dir/outputs"
 
+bash "$source_dir/build_speech_engine.sh"
+cp "$project_dir/work/voice-edit-update/whisper-build/bin/whisper-cli" "$macos_dir/whisper-cli"
+codesign --force --sign - "$macos_dir/whisper-cli"
+
 xcrun swiftc -O -target arm64-apple-macos13.0 -parse-as-library -module-name FanyiApp \
   "$source_dir/"*.swift \
   -o "$macos_dir/Translation" \
@@ -26,6 +30,7 @@ xcrun swiftc -O -target arm64-apple-macos13.0 -parse-as-library -module-name Fan
 
 cp "$source_dir/Info.plist" "$contents_dir/Info.plist"
 cp "$source_dir/ThirdPartyNotices.txt" "$resources_dir/ThirdPartyNotices.txt"
+cp "$project_dir/work/voice-edit-update/whisper.cpp/LICENSE" "$resources_dir/Whisper-LICENSE.txt"
 plutil -lint "$contents_dir/Info.plist" >/dev/null
 
 sips -z 1024 1024 "$source_dir/AppIconSource.png" --out "$build_dir/AppIcon.png" >/dev/null

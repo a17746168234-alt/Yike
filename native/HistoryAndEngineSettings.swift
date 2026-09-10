@@ -368,6 +368,9 @@ struct DeepLSettingsSheet: View {
                     .buttonStyle(.borderless)
             }
 
+            if let feedback = model.deepLKeyFeedback, feedback.kind == .error {
+                KeySaveFeedbackView(notice: feedback)
+            }
             SecureField("粘贴 DeepL API Key", text: $apiKey)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 14))

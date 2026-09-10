@@ -20,3 +20,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+whisper.cpp v1.7.6 (MIT)
+https://github.com/ggml-org/whisper.cpp
+Commit: a8d002cfd879315632a579e73f0148d06959de36
+Full license is included as Whisper-LICENSE.txt in the app bundle.
+Whisper base multilingual model (downloaded separately), OpenAI, MIT license.
+https://github.com/openai/whisper

@@ -31,24 +31,39 @@ macOS 原生翻译应用，支持中文、英文、日文和韩文。
 - `Shift + Command + F` 划词翻译浮窗
 - 在线神经语音朗读，可切换女声和男声，默认 -6% 语速
 - 翻译完成后自动预生成译文音频，点击朗读时优先播放缓存
-- 在线音频小型缓存上限约 40 MB，不下载本地语音模型
+- 在线朗读音频缓存上限约 40 MB；自动语音输入另需下载约 148 MB 的本地识别模型
 
 ## 安装
 
-从 [最新发布版本](https://github.com/a17746168234-alt/Yike/releases/latest) 下载 macOS 安装包。
-
 打开 `outputs/Yike-macOS-arm64.dmg`，将「Yike」拖入 Applications。
 
-当前安装包为 **1.6（Build 60），Apple Silicon / arm64**。Apple 翻译需要 **macOS 15 或以上**，每台 Mac 首次使用需联网确认并下载对应语言包；安装包不包含语言包或 DeepL 密钥。本应用的 Apple 翻译不支持 Windows。DeepL 需要用户自行设置 API Free 密钥。
+当前安装包为 **1.6（Build 63），Apple Silicon / arm64**。Apple 翻译需要 **macOS 15 或以上**，每台 Mac 首次使用需联网确认并下载对应语言包；安装包不包含语言包或 DeepL 密钥。本应用的 Apple 翻译不支持 Windows。DeepL 需要用户自行设置 API Free 密钥。
 
 翻译失败后，在右侧“原因 / 解决方法”处查看提示，再选择重试、设置密钥或切换引擎。无法确定的系统错误会明确标注未知原因并提供错误代码，不会将所有失败误报为断网。
 
+## Build 61 交互更新
+
+- 保存或更新 DeepL 密钥后，在主窗口及设置页显示保存成功反馈；只确认本机保存，密钥是否有效由实际 API 请求判断。
+- 自动检测语音模式使用本地 Whisper base 多语言模型，首次需确认下载约 148MB；录音结束后识别中文、英文、日文或韩文。手动选语言仍使用系统实时识别。
+- 录音时底部工具栏切换为实际麦克风音量驱动的波形，支持完成录音与取消处理。单次录音最多 60 秒，清晰语音后静音约 3.5 秒结束。
+- 右侧文字译文可直接输入、粘贴、删除、换行和撤销；编辑译文会停止旧译文朗读，复制使用修改后的内容。图片译文仍通过图片工具编辑。
+- 模型优先从 Hugging Face 下载，失败时尝试 hf-mirror.com 备用源；两者下载后均校验相同的大小与 SHA-256。录音只在本地暂存，识别或取消后清除；自动语音模式不上传录音。
+
+## Build 63 下载与界面更新
+
+- 修正语音模型下载失败后的重试入口；显示实际下载 MB 进度，官方源失败后自动尝试备用源，错误提示包含网络/代理、超时或 HTTP 状态及解决方法。网络可达性仍取决于每台电脑的环境。
+- 录音中按 Return 结束录音；处理中再次按 Return 不会取消或翻译。识别完成后可检查文字，再点击开始翻译。左右输入框均支持此操作，正常编辑译文时 Return 仍换行。
+- 开始翻译按钮的蓝色略加深，空输入时保持可辨认的文字和浅蓝边框；交换语言图标和玻璃底框更淡、阴影更轻。
+- 两侧空状态提示统一字体和对齐，右侧简化为“译文显示在这”。
+
 ## 构建
+
+构建需要 Xcode 与 CMake（或通过 `YIKE_CMAKE` 指定 CMake 路径）。首次构建会下载固定版本 whisper.cpp 源码并编译静态语音引擎；不会将语音模型打进 DMG。
 
 在项目根目录运行：
 
 ```bash
-bash native/build.sh
+./native/build.sh
 ```
 
 构建产物：
@@ -58,8 +73,10 @@ bash native/build.sh
 ## 自动化测试
 
 ```bash
-bash native/tests/run_tests.sh
-bash native/tests/run_ocr_tests.sh
+./native/tests/run_tests.sh
+./native/tests/run_ocr_tests.sh
+bash native/tests/run_voice_editing_tests.sh
+bash native/tests/run_speech_download_tests.sh
 ```
 
 基础测试覆盖系统钥匙串读写与删除、旧翻译请求失效和长文本分段。

@@ -13,7 +13,11 @@ import Carbon.HIToolbox
 final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDelegate {
     static let shared = TranslatorViewModel()
 
-    @Published var sourceText = ""
+    @Published var sourceText = "" {
+        didSet {
+            if sourceText != lastRecognizedText { detectedVoiceLanguage = nil }
+        }
+    }
     @Published var translatedText = ""
     @Published var sourceLanguage = "auto"
     @Published var targetLanguage = "zh-CN"
@@ -30,6 +34,20 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     @Published var imageHistoryRecordingEnabled = true
     @Published var copyLabel = "复制译文"
     @Published var isListening = false
+    @Published var deepLKeyFeedback: AppNotice?
+    @Published var showVoiceModelDownload = false
+    @Published private(set) var detectedVoiceLanguage: String?
+    private let localSpeech = LocalSpeechRecognizer()
+    private var voiceRecorder: AVAudioRecorder?
+    private var voiceAudioURL: URL?
+    private var voiceOperation: Task<Void, Never>?
+    private var voiceMeterTask: Task<Void, Never>?
+    private var voiceSession: UUID?
+    private var hasInputTap = false
+    private var keyFeedbackTask: Task<Void, Never>?
+    @Published private(set) var isVoiceProcessing = false
+    @Published private(set) var microphoneLevel: Float = 0
+    @Published private(set) var voiceInputStatus = "正在聆听…"
     @Published var history: [TranslationHistory] = []
     @Published private(set) var imageHistory: [ImageTranslationHistory] = []
     @Published var selectedEngine: TranslationEngine = .apple
@@ -209,7 +227,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
 
     var sourceName: String { languageName(sourceLanguage) }
     var targetName: String { languageName(targetLanguage) }
-    var canTranslate: Bool { !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoading }
+    var canTranslate: Bool { !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoading && !isListening && !isVoiceProcessing }
     var hasImageTranslation: Bool { sourceImage != nil }
     var canEditImageSourceText: Bool {
         sourceImage != nil && !recognizedImageBlocks.isEmpty && !isRecognizingImage
@@ -594,10 +612,12 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
 
     @discardableResult
     func saveDeepLKey(_ value: String) -> Bool {
+        keyFeedbackTask?.cancel()
         let cleanValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             try SecureKeyStore.saveDeepLKey(cleanValue)
         } catch {
+            deepLKeyFeedback = AppNotice(kind: .error, message: "密钥保存失败，请重试：\(error.localizedDescription)")
             setError("无法保存到系统钥匙串：\(error.localizedDescription)")
             return false
         }
@@ -608,12 +628,27 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         if hasDeepLKey {
             Task { await self.fetchDeepLUsage() }
         }
+        keyFeedbackTask?.cancel()
+        deepLKeyFeedback = AppNotice(kind: .success, message: hasDeepLKey ? "DeepL 密钥已保存成功，已切换到 DeepL" : "DeepL 密钥已移除")
+        keyFeedbackTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            self?.deepLKeyFeedback = nil
+        }
         return true
+    }
+
+    func editTranslatedText(_ value: String) {
+        guard value != translatedText else { return }
+        cancelSpeechPreload()
+        stopOnlineSpeech()
+        translatedText = value
+        speechStatusMessage = nil
+        copyLabel = "复制译文"
     }
 
     func setSourceLanguage(_ value: String) {
         cancelTranslation()
-        if isListening { stopListening() }
+        if isListening || isVoiceProcessing { cancelVoiceInput() }
         sourceLanguage = value
         if targetLanguage == value {
             targetLanguage = value == "zh-CN" ? "en" : "zh-CN"
@@ -631,7 +666,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     func swapLanguages() {
         guard !hasImageTranslation else { return }
         cancelTranslation()
-        if isListening { stopListening() }
+        if isListening || isVoiceProcessing { cancelVoiceInput() }
         cancelSpeechPreload()
         if sourceLanguage == "auto" {
             sourceLanguage = detectSupportedLanguage(in: sourceText)
@@ -647,7 +682,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         ocrTask = nil
         recognitionGate.cancel()
         imageRequestGate.cancel()
-        if isListening { stopListening() }
+        if isListening || isVoiceProcessing { cancelVoiceInput() }
         cancelSpeechPreload()
         stopOnlineSpeech()
         translationTask?.cancel()
@@ -866,9 +901,11 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
 
     func translate() {
         let cleanText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanText.isEmpty, !isLoading else { return }
+        guard !cleanText.isEmpty, !isLoading, !isListening, !isVoiceProcessing else { return }
 
-        let effectiveSource = sourceLanguage == "auto" ? detectSupportedLanguage(in: cleanText) : sourceLanguage
+        let effectiveSource = sourceLanguage == "auto"
+            ? ((sourceText == lastRecognizedText ? detectedVoiceLanguage : nil) ?? detectSupportedLanguage(in: cleanText))
+            : sourceLanguage
         if sourceLanguage == "auto" {
             if effectiveSource == "en" { targetLanguage = "zh-CN" }
             else if effectiveSource == "zh-CN" { targetLanguage = "en" }
@@ -1638,7 +1675,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     private let popupVoiceInput = PopupVoiceInput()
 
     func startPopupVoiceInput() {
-        if isListening { stopListening() }
+        if isListening || isVoiceProcessing { cancelVoiceInput() }
         popupTranslationTask?.cancel()
         popupAppleTranslationRequest = nil
         popupIsLoading = false
@@ -1673,110 +1710,260 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
 
     func toggleListening() {
         cancelPopupVoiceInput()
-        if isListening {
-            stopListening()
+        if isListening || isVoiceProcessing { stopListening(); return }
+        if sourceLanguage == "auto" && !LocalSpeechRecognizer.isModelInstalled {
+            showVoiceModelDownload = true
             return
         }
+        beginVoiceAuthorization()
+    }
 
-        Task {
-            let speechStatus = await requestSpeechAuthorization()
-            guard speechStatus == .authorized else {
-                setError("请在系统设置中允许“Yike”使用语音识别", action: .openSpeechRecognitionSettings)
-                return
+    func downloadVoiceModelAndStart() {
+        showVoiceModelDownload = false
+        cancelVoiceInput()
+        let id = UUID()
+        voiceSession = id
+        isVoiceProcessing = true
+        notice = nil
+        voiceInputStatus = "正在下载语音模型（约 148MB）…"
+        voiceOperation = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await LocalSpeechRecognizer.downloadModel { [weak self] status in
+                    guard let self, self.voiceSession == id, self.isVoiceProcessing else { return }
+                    self.voiceInputStatus = status
+                }
+                guard self.voiceSession == id, !Task.isCancelled else { return }
+                self.isVoiceProcessing = false
+                self.voiceSession = nil
+                self.beginVoiceAuthorization()
+            } catch {
+                guard self.voiceSession == id, !Task.isCancelled else { return }
+                self.cancelVoiceInput()
+                self.notice = AppNotice(kind: .error, message: error.localizedDescription, retryVoiceModelDownload: true)
             }
-
-            let microphoneAllowed = await AVCaptureDevice.requestAccess(for: .audio)
-            guard microphoneAllowed else {
-                setError("请在系统设置中允许“Yike”使用麦克风", action: .openMicrophoneSettings)
-                return
-            }
-
-            startListening()
         }
     }
 
+    private func beginVoiceAuthorization() {
+        cancelVoiceInput()
+        cancelTranslation()
+        cancelSpeechPreload()
+        stopOnlineSpeech()
+        let id = UUID()
+        voiceSession = id
+        let language = sourceLanguage
+        isVoiceProcessing = true
+        voiceInputStatus = "正在准备麦克风…"
+        voiceOperation = Task { [weak self] in
+            guard let self else { return }
+            // Automatic mode is local; it does not send speech to Apple's online recognizer.
+            if language != "auto" {
+                let status = await self.requestSpeechAuthorization()
+                guard self.voiceSession == id, !Task.isCancelled else { return }
+                guard status == .authorized else {
+                    self.cancelVoiceInput()
+                    self.setError("请在系统设置中允许“Yike”使用语音识别", action: .openSpeechRecognitionSettings)
+                    return
+                }
+            }
+            let allowed = await AVCaptureDevice.requestAccess(for: .audio)
+            guard self.voiceSession == id, !Task.isCancelled else { return }
+            guard allowed else {
+                self.cancelVoiceInput()
+                self.setError("请在系统设置中允许“Yike”使用麦克风", action: .openMicrophoneSettings)
+                return
+            }
+            self.speechBaseText = self.sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.lastRecognizedText = self.speechBaseText
+            self.detectedVoiceLanguage = nil
+            self.isVoiceProcessing = false
+            if language == "auto" { self.startLocalRecording(id: id) }
+            else { self.startSystemListening(language: language, id: id) }
+        }
+    }
+
+    private func startLocalRecording(id: UUID) {
+        do {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("YikeVoice", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let file = directory.appendingPathComponent(UUID().uuidString + ".wav")
+            voiceAudioURL = file
+            let recorder = try AVAudioRecorder(url: file, settings: [
+                AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000,
+                AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false
+            ])
+            recorder.isMeteringEnabled = true
+            voiceRecorder = recorder
+            guard recorder.record(forDuration: 60) else { throw LocalSpeechError.recognitionFailed }
+            isListening = true
+            notice = nil
+            voiceInputStatus = "自动识别中英日韩 · 回车完成"
+            voiceMeterTask = Task { [weak self] in
+                guard let self else { return }
+                var lastSound = Date()
+                var heardSpeech = false
+                let started = Date()
+                while !Task.isCancelled, self.voiceSession == id, self.isListening {
+                    recorder.updateMeters()
+                    let db = recorder.averagePower(forChannel: 0)
+                    self.microphoneLevel = VoiceMeter.normalized(decibels: db)
+                    if db > -42 { heardSpeech = true; lastSound = Date() }
+                    if !recorder.isRecording || (heardSpeech && Date().timeIntervalSince(lastSound) > 3.5) || (!heardSpeech && Date().timeIntervalSince(started) > 10) {
+                        if heardSpeech { self.finishLocalRecording(id: id) }
+                        else { self.cancelVoiceInput(); self.setInfo("没有听到清晰语音，请检查麦克风后再试。") }
+                        return
+                    }
+                    do { try await Task.sleep(for: .milliseconds(60)) } catch { return }
+                }
+            }
+        } catch {
+            cancelVoiceInput()
+            setError("无法启动录音：\(error.localizedDescription) 请检查麦克风连接及权限。")
+        }
+    }
+
+    func handleReturnKey() {
+        if isListening { stopListening() }
+        else if !isVoiceProcessing { translate() }
+    }
+
     func stopListening() {
-        guard isListening || audioEngine.isRunning else { return }
+        if isVoiceProcessing { cancelVoiceInput(); return }
+        guard isListening else { return }
+        if voiceRecorder != nil, let id = voiceSession { finishLocalRecording(id: id) }
+        else { cancelVoiceInput() }
+    }
+
+    private func finishLocalRecording(id: UUID) {
+        guard voiceSession == id, let recorder = voiceRecorder, let file = voiceAudioURL else { return }
+        let duration = recorder.currentTime
+        recorder.stop()
+        voiceRecorder = nil
+        voiceMeterTask?.cancel()
+        voiceMeterTask = nil
+        isListening = false
+        microphoneLevel = 0
+        guard duration > 0.4 else { cancelVoiceInput(); setInfo("录音太短，请说一句完整的话后再试。"); return }
+        isVoiceProcessing = true
+        voiceInputStatus = "正在本机识别语言和文字…"
+        voiceOperation = Task { [weak self] in
+            guard let self else { return }
+            defer { try? FileManager.default.removeItem(at: file) }
+            do {
+                let result = try await self.localSpeech.transcribe(audioURL: file)
+                guard self.voiceSession == id, !Task.isCancelled else { return }
+                self.appendVoiceText(result.text)
+                self.detectedVoiceLanguage = result.language
+                self.targetLanguage = result.language == "en" ? "zh-CN" : (result.language == "zh-CN" ? "en" : "zh-CN")
+                self.isVoiceProcessing = false
+                self.voiceSession = nil
+                self.voiceAudioURL = nil
+                self.voiceInputStatus = "已识别：\(languageName(result.language))"
+            } catch {
+                guard self.voiceSession == id, !Task.isCancelled else { return }
+                self.cancelVoiceInput()
+                self.setError(error.localizedDescription)
+            }
+        }
+    }
+
+    private func appendVoiceText(_ spokenText: String) {
+        let combined = speechBaseText.isEmpty ? spokenText : "\(speechBaseText) \(spokenText)"
+        lastRecognizedText = String(combined.prefix(maxSourceCharacters))
+        sourceText = lastRecognizedText
+    }
+
+    func cancelVoiceInput() {
+        voiceSession = nil
+        voiceOperation?.cancel()
+        voiceOperation = nil
+        voiceMeterTask?.cancel()
+        voiceMeterTask = nil
+        voiceRecorder?.stop()
+        voiceRecorder = nil
+        localSpeech.cancel()
+        if let file = voiceAudioURL { try? FileManager.default.removeItem(at: file) }
+        voiceAudioURL = nil
         silenceTask?.cancel()
         silenceTask = nil
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        if hasInputTap { audioEngine.inputNode.removeTap(onBus: 0); hasInputTap = false }
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
         isListening = false
-        if !lastRecognizedText.isEmpty {
-            sourceText = lastRecognizedText
-        }
+        isVoiceProcessing = false
+        microphoneLevel = 0
     }
 
     private func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
         await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
+            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
         }
     }
 
-    private func startListening() {
-        let listenLanguage = sourceLanguage == "auto" ? detectSupportedLanguage(in: sourceText) : sourceLanguage
-        guard let localeID = speechLocales[listenLanguage],
-              let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeID)),
-              recognizer.isAvailable else {
-            setError("当前原文语言暂时无法使用语音识别")
+    private func startSystemListening(language: String, id: UUID) {
+        guard let locale = speechLocales[language], let recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale)), recognizer.isAvailable else {
+            cancelVoiceInput()
+            setError("当前语言的系统语音识别暂不可用，请检查网络后重试，或改用自动检测。")
             return
         }
-
-        recognitionTask?.cancel()
-        recognitionTask = nil
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         recognitionRequest = request
-        speechBaseText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
-        lastRecognizedText = speechBaseText
-
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-            request.append(buffer)
+        let input = audioEngine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            cancelVoiceInput(); setError("没有可用的麦克风，请检查设备连接。"); return
         }
-
-        audioEngine.prepare()
+        input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
+            request.append(buffer)
+            guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+            var sum: Float = 0
+            for index in 0..<Int(buffer.frameLength) { sum += samples[index] * samples[index] }
+            let db = 20 * log10(max(0.000001, sqrt(sum / Float(buffer.frameLength))))
+            let level = VoiceMeter.normalized(decibels: db)
+            Task { @MainActor in
+                guard let self, self.voiceSession == id else { return }
+                self.microphoneLevel = level
+            }
+        }
+        hasInputTap = true
         do {
+            audioEngine.prepare()
             try audioEngine.start()
             isListening = true
             notice = nil
-            scheduleAutomaticStop(after: 8.0)
+            voiceInputStatus = "正在聆听\(languageName(language))…"
+            scheduleAutomaticStop(after: 8, id: id)
         } catch {
-            inputNode.removeTap(onBus: 0)
-            recognitionRequest = nil
-            setError("无法启动麦克风，请稍后重试")
-            return
+            cancelVoiceInput(); setError("无法启动麦克风，请检查设备后重试。"); return
         }
-
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.voiceSession == id else { return }
                 if let result {
-                    let spokenText = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !spokenText.isEmpty {
-                        let combined = self.speechBaseText.isEmpty ? spokenText : "\(self.speechBaseText) \(spokenText)"
-                        self.lastRecognizedText = String(combined.prefix(maxSourceCharacters))
-                        self.sourceText = self.lastRecognizedText
-                    }
-                    self.scheduleAutomaticStop(after: 4.0)
+                    let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty { self.appendVoiceText(text) }
+                    if result.isFinal { self.cancelVoiceInput(); return }
+                    self.scheduleAutomaticStop(after: 4, id: id)
                 }
-                if error != nil { self.stopListening() }
+                if error != nil {
+                    self.cancelVoiceInput()
+                    self.setError("系统语音识别中断，已保留识别文字。请检查网络，或改用自动检测进行本地识别。")
+                }
             }
         }
     }
 
-    private func scheduleAutomaticStop(after seconds: Double) {
+    private func scheduleAutomaticStop(after seconds: Double, id: UUID) {
         silenceTask?.cancel()
         silenceTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            guard !Task.isCancelled, let self, self.isListening else { return }
+            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+            guard let self, self.voiceSession == id, self.isListening else { return }
             self.stopListening()
         }
     }

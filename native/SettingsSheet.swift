@@ -191,6 +191,7 @@ struct SettingsSheet: View {
             ))
         }
         case .deepl:
+        if let feedback = model.deepLKeyFeedback { KeySaveFeedbackView(notice: feedback) }
         settingsCard("DeepL 密钥与帮助", icon: "key") {
             if let usage = model.deepLUsage {
                 LabeledContent("DeepL 免费额度") {

@@ -211,3 +211,26 @@ struct FloatingGlassButtonStyle: ButtonStyle {
             .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
     }
 }
+
+struct LanguageSwapButtonStyle: ButtonStyle {
+    @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: MacVisualTokens.floatingRadius, style: .continuous)
+        configuration.label
+            .background {
+                if glassEnabled {
+                    shape.fill(.ultraThinMaterial).opacity(0.38)
+                } else {
+                    shape.fill(MacVisualTokens.controlFill.opacity(0.40))
+                }
+            }
+            .overlay {
+                shape.stroke(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.34), lineWidth: 0.6)
+            }
+            .shadow(color: Color.black.opacity(0.035), radius: 3, y: 1)
+            .opacity(configuration.isPressed ? 0.76 : 1)
+            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
+    }
+}

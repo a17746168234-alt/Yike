@@ -77,6 +77,9 @@ struct TranslatorView: View {
         }
         .frame(minWidth: 934, minHeight: 560)
         .preferredColorScheme(preferredScheme)
+        .overlay(alignment: .top) {
+            if let feedback = model.deepLKeyFeedback { KeySaveFeedbackView(notice: feedback) }
+        }
         .onAppear {
             migrateAppearanceIfNeeded()
             applyAppearance()
@@ -97,6 +100,22 @@ struct TranslatorView: View {
         }
         .sheet(isPresented: $showHistory) {
             HistorySheet(model: model, isPresented: $showHistory)
+        }
+        .sheet(isPresented: $model.showVoiceModelDownload) {
+            VStack(alignment: .leading, spacing: 16) {
+                Label("启用语音自动检测", systemImage: "waveform")
+                    .font(.system(size: 18, weight: .semibold))
+                Text("首次下载约 148MB 的中英日韩语音模型，之后可在本机自动识别，无需密钥。录音不会上传到翻译服务；识别后点击翻译时按所选翻译引擎处理文字。")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                Text("自动模式录音结束后显示文字；手动选择语言可使用系统实时识别。")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                HStack {
+                    Button("暂不下载") { model.showVoiceModelDownload = false }
+                    Spacer()
+                    Button("下载并开始录音", action: model.downloadVoiceModelAndStart)
+                        .buttonStyle(.borderedProminent)
+                }
+            }.padding(24).frame(width: 450)
         }
         .sheet(isPresented: $showDeepLSettings) {
             DeepLSettingsSheet(model: model, isPresented: $showDeepLSettings)
@@ -241,11 +260,11 @@ struct TranslatorView: View {
 
                 Button(action: model.swapLanguages) {
                     Image(systemName: "arrow.left.arrow.right")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(accent)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(accent.opacity(0.72))
                         .frame(width: 40, height: 40)
                 }
-                    .buttonStyle(FloatingGlassButtonStyle())
+                    .buttonStyle(LanguageSwapButtonStyle())
                     .disabled(model.hasImageTranslation)
                     .opacity(model.hasImageTranslation ? 0.42 : 1)
             }
@@ -294,7 +313,7 @@ struct TranslatorView: View {
                             SubmitTextEditor(text: Binding(
                                 get: { model.sourceText },
                                 set: { model.sourceText = String($0.prefix(maxSourceCharacters)) }
-                            ), isDarkMode: effectiveDarkMode, onSubmit: model.translate, onImageDrop: model.recognizeAndTranslateImage)
+                            ), isDarkMode: effectiveDarkMode, onSubmit: model.handleReturnKey, onImageDrop: model.recognizeAndTranslateImage)
                             .background(editorTint)
                         }
 
@@ -316,20 +335,14 @@ struct TranslatorView: View {
                                 AdaptiveGlassBackdrop(materialOpacity: 0.96, tintOpacity: 0.18)
                             }
                         } else if model.sourceImage == nil && model.sourceText.isEmpty {
-                            VStack(spacing: 9) {
-                                Text(inputPlaceholder)
-                                    .font(.system(size: 15, weight: .regular))
-                                Label(imageDropHint, systemImage: "photo.on.rectangle.angled")
-                                    .font(.system(size: 12, weight: .regular))
-                                    .foregroundStyle(MacVisualTokens.secondaryLabel)
-                            }
-                            .foregroundStyle(MacVisualTokens.secondaryLabel)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            .padding(.top, 86)
-                            .allowsHitTesting(false)
+                            EditorEmptyState(title: inputPlaceholder, imageHint: imageDropHint)
                         }
                     }
                     HStack {
+                        if model.sourceLanguage == "auto", let detected = model.detectedVoiceLanguage {
+                            Text("语音识别：\(languageName(detected))")
+                                .font(.system(size: 11)).foregroundStyle(accent)
+                        }
                         Spacer()
                         Text(model.hasImageTranslation ? "图片原文 · \(model.sourceText.count) 字符" : "\(model.sourceText.count) / \(maxSourceCharacters)")
                             .font(.system(size: 11))
@@ -422,7 +435,10 @@ struct TranslatorView: View {
                                         Button(action.buttonTitle) { action.open() }.buttonStyle(.bordered)
                                     }
                                     if notice.kind == .error {
-                                        Button("重新尝试", action: model.translate).buttonStyle(.bordered)
+                                        Button(notice.retryVoiceModelDownload ? "重新下载" : "重新尝试") {
+                                            if notice.retryVoiceModelDownload { model.downloadVoiceModelAndStart() }
+                                            else { model.translate() }
+                                        }.buttonStyle(.bordered)
                                         if model.hasImageTranslation {
                                             Button("换引擎重试") {
                                                 model.setEngine(model.selectedEngine == .apple ? .deepl : .apple)
@@ -436,22 +452,15 @@ struct TranslatorView: View {
                             TranslationImagePane(image: translatedImage, title: "译文图片 · \(model.imageRenderStyle.title)", accent: accent) {
                                 imagePreview = ImagePreviewItem(title: "译文图片 · \(model.imageRenderStyle.title)", image: translatedImage)
                             }
-                        } else if model.translatedText.isEmpty {
-                            VStack(spacing: 12) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                        .fill(.thinMaterial)
-                                        .frame(width: 54, height: 54)
-                                        .macGlassBorder(cornerRadius: 13)
-                                    Image(systemName: "character.book.closed")
-                                        .font(.system(size: 21, weight: .regular))
-                                        .foregroundStyle(accent)
-                                }
-                                Text(model.hasImageTranslation ? "译文图片会显示在这里" : "译文会显示在这里")
-                                    .font(.system(size: 12)).foregroundStyle(MacVisualTokens.secondaryLabel)
-                            }.frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
-                            ScrollView { TypewriterTranslationText(text: model.translatedText, highlightedText: model.highlightedTranslatedText, isSpeaking: model.isSpeakingResult).font(.system(size: 15)).lineSpacing(5).foregroundStyle(ink).frame(maxWidth: .infinity, alignment: .topLeading).padding(24).textSelection(.enabled) }
+                            ZStack(alignment: .topLeading) {
+                                ResultTextEditor(text: Binding(get: { model.translatedText }, set: model.editTranslatedText),
+                                                 isVoiceActive: model.isListening || model.isVoiceProcessing,
+                                                 onVoiceReturn: model.handleReturnKey)
+                                if model.translatedText.isEmpty {
+                                    EditorEmptyState(title: "译文显示在这", symbol: "text.bubble")
+                                }
+                            }
                         }
                     }
                 }
@@ -478,6 +487,10 @@ struct TranslatorView: View {
 
             Rectangle().fill(line).frame(height: 0.5)
 
+            if model.isListening || model.isVoiceProcessing {
+                VoiceInputBar(level: model.microphoneLevel, status: model.voiceInputStatus,
+                              isRecording: model.isListening, stop: model.stopListening)
+            } else {
             HStack(spacing: 12) {
                 HStack(spacing: 10) {
                     Button(action: model.toggleListening) {
@@ -519,7 +532,7 @@ struct TranslatorView: View {
                     }
                         .font(.system(size: 13, weight: .semibold))
                         .frame(width: 174, height: 40)
-                        .foregroundStyle(model.canTranslate ? Color.white : MacVisualTokens.secondaryLabel)
+                        .foregroundStyle(model.canTranslate ? Color.white : ink.opacity(0.62))
                         .background {
                             let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
                             ZStack {
@@ -530,13 +543,13 @@ struct TranslatorView: View {
                                     model.canTranslate
                                         ? (glassEnabled
                                             ? AnyShapeStyle(LinearGradient(
-                                                colors: [accent.opacity(0.70),
-                                                         accent.opacity(0.44)],
+                                                colors: [accent.opacity(0.80),
+                                                         accent.opacity(0.56)],
                                                 startPoint: .topLeading,
                                                 endPoint: .bottomTrailing
                                             ))
                                             : AnyShapeStyle(accent))
-                                        : AnyShapeStyle(surface.opacity(effectiveDarkMode ? 0.30 : 0.46))
+                                        : AnyShapeStyle(accent.opacity(effectiveDarkMode ? 0.16 : 0.09))
                                 )
                             }
                         }
@@ -548,7 +561,7 @@ struct TranslatorView: View {
                                         colors: [Color.white.opacity(model.canTranslate
                                             ? (effectiveDarkMode ? 0.40 : 0.82)
                                             : (effectiveDarkMode ? 0.20 : 0.38)),
-                                                 accent.opacity(model.canTranslate ? 0.34 : 0.10)],
+                                                 accent.opacity(model.canTranslate ? 0.40 : 0.24)],
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
                                     ))
@@ -561,7 +574,7 @@ struct TranslatorView: View {
                             y: glassEnabled ? 4 : 0
                         )
                 }
-                .buttonStyle(.plain).disabled(!model.canTranslate)
+                .buttonStyle(TranslationActionButtonStyle()).disabled(!model.canTranslate)
                 .keyboardShortcut(.return, modifiers: [])
 
                 HStack(spacing: 10) {
@@ -654,6 +667,7 @@ struct TranslatorView: View {
             }
             .padding(.horizontal, 20)
             .frame(height: 64)
+            }
         }
         .background {
             AdaptiveGlassBackdrop(materialOpacity: 0.84, tintOpacity: 0.07, regular: false)

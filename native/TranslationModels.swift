@@ -166,6 +166,7 @@ struct AppNotice {
     let message: String
     var action: NoticeAction? = nil
     var diagnostic: TranslationDiagnostic? = nil
+    var retryVoiceModelDownload = false
 
     static func translation(_ diagnostic: TranslationDiagnostic) -> Self {
         Self(kind: .error, message: diagnostic.message, diagnostic: diagnostic)

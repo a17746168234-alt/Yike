@@ -9,6 +9,104 @@ import UniformTypeIdentifiers
 import ApplicationServices
 import Carbon.HIToolbox
 
+/// Keep the explicitly styled disabled label legible instead of dimming it twice.
+struct TranslationActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.88 : 1)
+    }
+}
+
+/// Shared empty-state typography and baseline for both editor panes.
+struct EditorEmptyState: View {
+    let title: String
+    var symbol: String? = nil
+    var imageHint: String? = nil
+
+    var body: some View {
+        VStack(spacing: 9) {
+            HStack(spacing: 8) {
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(MacVisualTokens.tertiaryLabel)
+                        .accessibilityHidden(true)
+                }
+                Text(title)
+                    .font(.system(size: 15, weight: .regular))
+            }
+            if let imageHint {
+                Label(imageHint, systemImage: "photo.on.rectangle.angled")
+                    .font(.system(size: 12, weight: .regular))
+            }
+        }
+        .foregroundStyle(MacVisualTokens.secondaryLabel)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 24)
+        .padding(.top, 86)
+        .allowsHitTesting(false)
+    }
+}
+
+/// Native editable result, with selection, deletion, multiline input and undo.
+struct ResultTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    var isVoiceActive = false
+    var onVoiceReturn: () -> Void = {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        let editor = NSTextView()
+        editor.isRichText = false
+        editor.importsGraphics = false
+        editor.drawsBackground = false
+        editor.allowsUndo = true
+        editor.isVerticallyResizable = true
+        editor.isHorizontallyResizable = false
+        editor.autoresizingMask = [.width]
+        editor.textContainer?.widthTracksTextView = true
+        editor.textContainerInset = NSSize(width: 24, height: 20)
+        editor.font = .systemFont(ofSize: 15)
+        editor.textColor = .labelColor
+        editor.insertionPointColor = .controlAccentColor
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 5
+        editor.defaultParagraphStyle = paragraph
+        editor.string = text
+        editor.setAccessibilityLabel("译文，可编辑")
+        editor.delegate = context.coordinator
+        scroll.documentView = editor
+        return scroll
+    }
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let editor = scroll.documentView as? NSTextView else { return }
+        editor.textColor = .labelColor
+        if editor.string != text {
+            editor.string = text
+            editor.undoManager?.removeAllActions()
+        }
+    }
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: ResultTextEditor
+        init(parent: ResultTextEditor) { self.parent = parent }
+        func textDidChange(_ notification: Notification) {
+            guard let editor = notification.object as? NSTextView else { return }
+            parent.text = editor.string
+        }
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            guard commandSelector == #selector(NSResponder.insertNewline(_:)),
+                  parent.isVoiceActive,
+                  NSApp.currentEvent?.modifierFlags.contains(.shift) != true else { return false }
+            if NSApp.currentEvent?.isARepeat != true { parent.onVoiceReturn() }
+            return true
+        }
+    }
+}
+
 struct SubmitTextEditor: NSViewRepresentable {
     @Binding var text: String
     let isDarkMode: Bool
@@ -86,7 +184,7 @@ struct SubmitTextEditor: NSViewRepresentable {
                 if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
                     return false
                 }
-                parent.onSubmit()
+                if NSApp.currentEvent?.isARepeat != true { parent.onSubmit() }
                 return true
             }
             return false
