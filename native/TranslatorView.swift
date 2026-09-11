@@ -101,6 +101,9 @@ struct TranslatorView: View {
         .sheet(isPresented: $showHistory) {
             HistorySheet(model: model, isPresented: $showHistory)
         }
+        .sheet(isPresented: $model.showSharedAccount) {
+            SettingsSheet(model: model, openAccount: true)
+        }
         .sheet(isPresented: $model.showVoiceModelDownload) {
             VStack(alignment: .leading, spacing: 16) {
                 Label("启用语音自动检测", systemImage: "waveform")
@@ -189,6 +192,12 @@ struct TranslatorView: View {
                         }
                     } label: {
                         Label("DeepL 高质量", systemImage: model.selectedEngine == .deepl ? "checkmark" : "sparkles")
+                    }
+                    Button {
+                        model.setEngine(.sharedDeepL)
+                        if !SharedTrialAccount.shared.isSignedIn { model.showSharedAccount = true }
+                    } label: {
+                        Label("公共 DeepL 体验", systemImage: model.selectedEngine == .sharedDeepL ? "checkmark" : "gift")
                     }
                     Divider()
                     if let usage = model.deepLUsage {
@@ -751,6 +760,7 @@ struct TranslatorView: View {
         switch model.selectedEngine {
         case .apple: return "Apple 系统本机翻译"
         case .deepl: return "内容由 DeepL 在线处理"
+        case .sharedDeepL: return "公共体验 · 文字经 Yike 服务器交由 DeepL 处理"
         }
     }
 

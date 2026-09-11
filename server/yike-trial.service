@@ -1,0 +1,30 @@
+[Unit]
+Description=Yike accounts and shared translation trial
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=yike-trial
+Group=yike-trial
+WorkingDirectory=/opt/yike-trial
+EnvironmentFile=/etc/yike-trial.env
+ExecStart=/usr/bin/python3 /opt/yike-trial/app.py
+Restart=on-failure
+RestartSec=5
+StateDirectory=yike-trial
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yike-trial
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryHigh=128M
+MemoryMax=192M
+CPUQuota=30%
+TasksMax=32
+LimitNOFILE=256
+
+[Install]
+WantedBy=multi-user.target

@@ -2,11 +2,12 @@ import SwiftUI
 import AppKit
 
 private enum SettingsSection: String, CaseIterable, Identifiable {
-    case appearance, deepl, speech, shortcuts, permissions, history, glossary, about
+    case appearance, account, deepl, speech, shortcuts, permissions, history, glossary, about
     var id: String { rawValue }
     var title: String {
         switch self {
         case .appearance: return "外观"
+        case .account: return "账号与安全"
         case .deepl: return "DeepL 密钥与帮助"
         case .speech: return "在线朗读"
         case .shortcuts: return "快捷键与划词"
@@ -19,6 +20,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .appearance: return "paintpalette"
+        case .account: return "person.crop.circle.badge.checkmark"
         case .deepl: return "key.horizontal"
         case .speech: return "waveform"
         case .shortcuts: return "keyboard"
@@ -31,6 +33,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .appearance: return "让 Yike 符合你的使用习惯"
+        case .account: return "管理账号、登录安全与公共体验额度"
         case .deepl: return "从申请账号到填写密钥，一步步完成"
         case .speech: return "调整声音、语速与本地缓存"
         case .shortcuts: return "自定义快捷键，随时呼出翻译悬浮窗"
@@ -45,6 +48,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: TranslatorViewModel
+    var openAccount = false
     @AppStorage("fanyi.appearance.mode") private var appearanceMode = "system"
     @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
     @State private var selectedSection: SettingsSection = .appearance
@@ -138,6 +142,7 @@ struct SettingsSheet: View {
                 .ignoresSafeArea()
         }
         .onAppear {
+            if openAccount { selectedSection = .account }
             model.refreshSpeechCacheSize()
             if model.hasDeepLKey { Task { await model.fetchDeepLUsage() } }
         }
@@ -189,6 +194,10 @@ struct SettingsSheet: View {
                 get: { model.imageHistoryRecordingEnabled },
                 set: { model.setImageHistoryRecording($0) }
             ))
+        }
+        case .account:
+        settingsCard("账号与安全", icon: "person.crop.circle") {
+            TrialAccountSettings(model: model)
         }
         case .deepl:
         if let feedback = model.deepLKeyFeedback { KeySaveFeedbackView(notice: feedback) }

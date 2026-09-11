@@ -12,6 +12,7 @@ import Carbon.HIToolbox
 enum TranslationEngine: String, CaseIterable, Identifiable {
     case apple
     case deepl
+    case sharedDeepL
 
     var id: String { rawValue }
 
@@ -19,6 +20,7 @@ enum TranslationEngine: String, CaseIterable, Identifiable {
         switch self {
         case .apple: return "Apple 系统翻译"
         case .deepl: return "DeepL 高质量"
+        case .sharedDeepL: return "公共 DeepL 体验"
         }
     }
 
@@ -26,6 +28,7 @@ enum TranslationEngine: String, CaseIterable, Identifiable {
         switch self {
         case .apple: return "Apple 翻译"
         case .deepl: return "DeepL"
+        case .sharedDeepL: return "公共 DeepL"
         }
     }
 }

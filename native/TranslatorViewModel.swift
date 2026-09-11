@@ -50,6 +50,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     @Published private(set) var voiceInputStatus = "正在聆听…"
     @Published var history: [TranslationHistory] = []
     @Published private(set) var imageHistory: [ImageTranslationHistory] = []
+    @Published var showSharedAccount = false
     @Published var selectedEngine: TranslationEngine = .apple
     @Published var appleTranslationRequest: AppleTranslationRequest? {
         didSet {
@@ -437,10 +438,10 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 popupIsLoading = false
                 popupNotice = .translation(.appleSystemRequired)
             }
-        case .deepl:
-            guard hasDeepLKey else {
+        case .deepl, .sharedDeepL:
+            guard selectedEngine == .sharedDeepL ? SharedTrialAccount.shared.isSignedIn : hasDeepLKey else {
                 popupIsLoading = false
-                popupNotice = .translation(.missingDeepLKey)
+                popupNotice = selectedEngine == .sharedDeepL ? AppNotice(kind: .info, message: "请在设置的“账号与安全”中注册或登录，领取公共体验额度。") : .translation(.missingDeepLKey)
                 return
             }
             popupTranslationTask = Task { [weak self] in
@@ -455,7 +456,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                         target: target,
                         glossaryMap: prepared.1
                     )
-                    Task { await self.fetchDeepLUsage() }
+                    Task { await self.refreshSelectedEngineUsage() }
                 } catch {
                     guard !Task.isCancelled else { return }
                     self.showPopupTranslationError(error, engine: .deepl)
@@ -510,7 +511,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         popupTranslationTask = nil
         popupAppleTranslationRequest = nil
         popupIsLoading = false
-        popupNotice = .translation(.explain(error, engine: engine))
+        popupNotice = error is TrialServiceError ? AppNotice(kind: .error, message: error.localizedDescription) : .translation(.explain(error, engine: engine))
     }
 
     func setEngine(_ engine: TranslationEngine) {
@@ -626,7 +627,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         if hasDeepLKey { setEngine(.deepl) }
         deepLUsage = nil
         if hasDeepLKey {
-            Task { await self.fetchDeepLUsage() }
+            Task { await self.refreshSelectedEngineUsage() }
         }
         keyFeedbackTask?.cancel()
         deepLKeyFeedback = AppNotice(kind: .success, message: hasDeepLKey ? "DeepL 密钥已保存成功，已切换到 DeepL" : "DeepL 密钥已移除")
@@ -945,11 +946,11 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 isLoading = false
                 notice = .translation(.appleSystemRequired)
             }
-        case .deepl:
-            guard hasDeepLKey else {
+        case .deepl, .sharedDeepL:
+            guard selectedEngine == .sharedDeepL ? SharedTrialAccount.shared.isSignedIn : hasDeepLKey else {
                 translationRequestGate.cancel()
                 isLoading = false
-                notice = .translation(.missingDeepLKey)
+                notice = selectedEngine == .sharedDeepL ? AppNotice(kind: .info, message: "请在设置的“账号与安全”中注册或登录，领取公共体验额度。") : .translation(.missingDeepLKey)
                 return
             }
             translationTask = Task { [weak self] in
@@ -1028,10 +1029,10 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 isLoading = false
                 notice = .translation(.appleSystemRequired)
             }
-        case .deepl:
-            guard hasDeepLKey else {
+        case .deepl, .sharedDeepL:
+            guard selectedEngine == .sharedDeepL ? SharedTrialAccount.shared.isSignedIn : hasDeepLKey else {
                 isLoading = false
-                notice = .translation(.missingDeepLKey)
+                notice = selectedEngine == .sharedDeepL ? AppNotice(kind: .info, message: "请在设置的“账号与安全”中注册或登录，领取公共体验额度。") : .translation(.missingDeepLKey)
                 return
             }
             let blocks = recognizedImageBlocks
@@ -1106,7 +1107,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 source: source,
                 target: target
             )
-            Task { await self.fetchDeepLUsage() }
+            Task { await self.refreshSelectedEngineUsage() }
         } catch {
             guard !Task.isCancelled, imageRequestGate.accepts(requestID) else { return }
             isLoading = false
@@ -1115,7 +1116,10 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     }
 
     private func deepLTranslations(for texts: [String], source: String, target: String) async throws -> [String] {
-        try await DeepLClient(apiKey: deepLAPIKey).translate(texts, source: source, target: target)
+        if selectedEngine == .sharedDeepL {
+            return try await SharedTrialAccount.shared.translate(texts, source: source, target: target)
+        }
+        return try await DeepLClient(apiKey: deepLAPIKey).translate(texts, source: source, target: target)
     }
 
     private func finishImageTranslation(
@@ -1245,7 +1249,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 glossaryMap: glossaryMap
             )
             finishTextTranslation(requestID: requestID)
-            Task { await self.fetchDeepLUsage() }
+            Task { await self.refreshSelectedEngineUsage() }
         } catch {
             guard !Task.isCancelled, translationRequestGate.accepts(requestID) else { return }
             finishTextTranslation(requestID: requestID)
@@ -1258,6 +1262,14 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         translationRequestGate.cancel()
         translationTask = nil
         isLoading = false
+    }
+
+    private func refreshSelectedEngineUsage() async {
+        if selectedEngine == .sharedDeepL {
+            await SharedTrialAccount.shared.refresh()
+        } else {
+            await fetchDeepLUsage()
+        }
     }
 
     func fetchDeepLUsage() async {
@@ -1280,7 +1292,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     }
 
     private func showTranslationError(_ error: Error) {
-        notice = .translation(.explain(error, engine: .deepl))
+        notice = error is TrialServiceError ? AppNotice(kind: .error, message: error.localizedDescription) : .translation(.explain(error, engine: .deepl))
     }
 
     private func acceptTranslation(
