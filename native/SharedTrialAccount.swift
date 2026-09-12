@@ -159,7 +159,11 @@ final class SharedTrialAccount: ObservableObject {
         var body = content; body["request_id"] = id
         struct Response: Decodable { let translations: [String]; let account: TrialAccount }
         do {
-            let result: Response = try await request("v1/translate", method: "POST", body: body)
+            let result: Response = try await SharedQuotaRetry.run {
+                try Task.checkCancellation()
+                guard revision == self.authRevision else { throw CancellationError() }
+                return try await self.request("v1/translate", method: "POST", body: body)
+            }
             try Task.checkCancellation()
             guard revision == authRevision else { throw CancellationError() }
             account = result.account

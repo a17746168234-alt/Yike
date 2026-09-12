@@ -105,14 +105,8 @@ enum AppleLanguagePreparation {
         guard let source = locales[source], let target = locales[target], source != target else {
             throw TranslationFailure.unsupportedLanguages
         }
-        let availability = await LanguageAvailability().status(from: Locale.Language(identifier: source), to: Locale.Language(identifier: target))
         try Task.checkCancellation()
-        switch availability {
-        case .installed: status("语言包已安装，正在准备翻译…")
-        case .supported: status("需要下载语言包，请确认系统提示；正在准备…")
-        case .unsupported: throw TranslationFailure.unsupportedLanguages
-        @unknown default: status("正在检查 Apple 语言包…")
-        }
+        status("正在准备 Apple 翻译；如需语言包，请确认系统下载提示…")
         // The public API exposes completion, not byte or percentage progress.
         do {
             try await session.prepareTranslation()

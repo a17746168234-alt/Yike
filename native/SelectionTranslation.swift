@@ -365,29 +365,12 @@ struct SelectionTranslationPopup: View {
 @available(macOS 15.0, *)
 struct PopupAppleTranslationWorker: View {
     @ObservedObject var model: TranslatorViewModel
-    @State private var configuration: TranslationSession.Configuration?
-    @State private var activeRequest: PopupAppleTranslationRequest?
-
     var body: some View {
-        Color.clear
-            .frame(width: 1, height: 1)
-            .allowsHitTesting(false)
-            .onChange(of: model.popupAppleTranslationRequest) { request in
-                guard let request,
-                      let sourceID = appleTranslationLocales[request.source],
-                      let targetID = appleTranslationLocales[request.target] else { return }
-                activeRequest = request
-                var next = TranslationSession.Configuration(
-                    source: Locale.Language(identifier: sourceID),
-                    target: Locale.Language(identifier: targetID)
-                )
-                if configuration == next { next.invalidate() }
-                configuration = next
-            }
-            .translationTask(configuration) { session in
-                guard let request = activeRequest,
-                      model.popupAppleTranslationRequest?.id == request.id else { return }
+        if let request = model.popupAppleTranslationRequest {
+            AppleRequestSession(source: request.source, target: request.target) { session in
                 await model.completePopupAppleTranslation(using: session, request: request)
             }
+            .id(request.id)
+        }
     }
 }

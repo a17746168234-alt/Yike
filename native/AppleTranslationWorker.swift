@@ -1,68 +1,49 @@
 import SwiftUI
-import AppKit
-import Speech
-import AVFoundation
 import Translation
-import Vision
-import NaturalLanguage
-import UniformTypeIdentifiers
-import ApplicationServices
-import Carbon.HIToolbox
 
 @available(macOS 15.0, *)
 struct AppleTranslationWorker: View {
     @ObservedObject var model: TranslatorViewModel
-    @State private var configuration: TranslationSession.Configuration?
-    @State private var activeTextRequest: AppleTranslationRequest?
-    @State private var activeImageRequest: AppleImageTranslationRequest?
 
     var body: some View {
-        Color.clear
-            .frame(width: 1, height: 1)
-            .onChange(of: model.appleTranslationRequest) { request in
-                if request == nil {
-                    activeTextRequest = nil
-                    if model.appleImageTranslationRequest == nil { configuration = nil }
-                    return
-                }
-                guard let request,
-                      let sourceID = appleTranslationLocales[request.source],
-                      let targetID = appleTranslationLocales[request.target] else { return }
-                activeTextRequest = request
-                activeImageRequest = nil
-                var next = TranslationSession.Configuration(
-                    source: Locale.Language(identifier: sourceID),
-                    target: Locale.Language(identifier: targetID)
-                )
-                if configuration == next { next.invalidate() }
-                configuration = next
-            }
-            .onChange(of: model.appleImageTranslationRequest) { request in
-                if request == nil {
-                    activeImageRequest = nil
-                    if model.appleTranslationRequest == nil { configuration = nil }
-                    return
-                }
-                guard let request,
-                      let sourceID = appleTranslationLocales[request.source],
-                      let targetID = appleTranslationLocales[request.target] else { return }
-                activeImageRequest = request
-                activeTextRequest = nil
-                var next = TranslationSession.Configuration(
-                    source: Locale.Language(identifier: sourceID),
-                    target: Locale.Language(identifier: targetID)
-                )
-                if configuration == next { next.invalidate() }
-                configuration = next
-            }
-            .translationTask(configuration) { session in
-                if let request = activeImageRequest,
-                   model.appleImageTranslationRequest?.id == request.id {
+        Group {
+            if let request = model.appleImageTranslationRequest {
+                AppleRequestSession(source: request.source, target: request.target) { session in
                     await model.completeAppleImageTranslation(using: session, request: request)
-                } else if let request = activeTextRequest,
-                          model.appleTranslationRequest?.id == request.id {
+                }
+                .id(request.id)
+            } else if let request = model.appleTranslationRequest {
+                AppleRequestSession(source: request.source, target: request.target) { session in
                     await model.completeAppleTranslation(using: session, request: request)
                 }
+                .id(request.id)
+            }
+        }
+    }
+}
+
+/// Each request owns a fresh session; no onChange hand-off can miss an initial
+/// request or reuse a cancelled session when the language pair stays the same.
+@available(macOS 15.0, *)
+struct AppleRequestSession: View {
+    let source: String
+    let target: String
+    let translate: (TranslationSession) async -> Void
+
+    private var configuration: TranslationSession.Configuration? {
+        guard let sourceID = appleTranslationLocales[source],
+              let targetID = appleTranslationLocales[target] else { return nil }
+        return TranslationSession.Configuration(
+            source: Locale.Language(identifier: sourceID),
+            target: Locale.Language(identifier: targetID)
+        )
+    }
+
+    var body: some View {
+        Color.clear.frame(width: 1, height: 1)
+            .allowsHitTesting(false)
+            .translationTask(configuration) { session in
+                await translate(session)
             }
     }
 }
