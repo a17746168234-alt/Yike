@@ -23,23 +23,30 @@ struct AccountSecuritySummary: View {
     @ObservedObject private var account = SharedTrialAccount.shared
     @ObservedObject var model: TranslatorViewModel
     @State private var showAuthentication = false
+    @State private var showProfile = false
+    @ObservedObject private var profile = UserProfile.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(spacing: 14) {
-                Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 38, weight: .light))
-                    .foregroundStyle(Color.accentColor.opacity(0.7))
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(account.account?.email ?? account.account?.username ?? (account.isSignedIn ? "正在读取账号…" : "未登录"))
-                        .font(.system(size: 15, weight: .semibold)).textSelection(.enabled)
-                    if account.isSignedIn && account.account?.email == nil && account.account != nil {
-                        Text("待验证邮箱").font(.system(size: 12)).foregroundStyle(.secondary)
-                    }
-                }
+                Button { if account.account?.email != nil { showProfile = true } else { showAuthentication = true } } label: {
+                    HStack(spacing: 14) {
+                        ProfileAvatar(email: account.account?.email, size: 44)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(account.account?.email.map { profile.name($0) } ?? "未登录")
+                                .font(.system(size: 15, weight: .semibold))
+                            if let email = account.account?.email {
+                                Text(email).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                    }.contentShape(Rectangle())
+                }.buttonStyle(.plain).help("编辑头像与用户名")
                 Spacer(minLength: 12)
                 Button(account.isSignedIn ? "管理账号" : "登录") { showAuthentication = true }
                     .buttonStyle(.borderedProminent).controlSize(.regular)
+            }
+            if account.account?.email != nil {
+                Button("编辑头像与用户名") { showProfile = true }.font(.system(size: 12))
             }
             if let current = account.account {
                 Divider()
@@ -57,6 +64,9 @@ struct AccountSecuritySummary: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
         .task { await account.refresh() }
+        .sheet(isPresented: $showProfile) {
+            if let email = account.account?.email { ProfileEditor(email: email) }
+        }
         .sheet(isPresented: $showAuthentication) { AccountAuthenticationSheet(model: model) }
     }
 }

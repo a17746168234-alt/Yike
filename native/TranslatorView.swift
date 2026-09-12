@@ -11,6 +11,7 @@ import Carbon.HIToolbox
 
 struct TranslatorView: View {
     @StateObject private var model = TranslatorViewModel.shared
+    @ObservedObject private var profile = UserProfile.shared
     @ObservedObject private var trialAccount = SharedTrialAccount.shared
     @AppStorage("fanyi.appearance.mode") private var appearanceMode = "system"
     @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
@@ -163,21 +164,20 @@ struct TranslatorView: View {
 
     private var header: some View {
         HStack {
-            HStack(spacing: 12) {
-                Image(nsImage: NSApplication.shared.applicationIconImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 38, height: 38)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Yike")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(ink)
-                    Label(engineStatusText, systemImage: model.selectedEngine == .apple ? "desktopcomputer" : "checkmark.shield")
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(MacVisualTokens.secondaryLabel)
-                }
-            }
+            Button { model.showSharedAccount = true } label: {
+                HStack(spacing: 12) {
+                    ProfileAvatar(email: trialAccount.account?.email, size: 44)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(trialAccount.account?.email.map { profile.name($0) } ?? "未登录")
+                            .font(.system(size: 20, weight: .semibold)).foregroundStyle(ink)
+                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            TranslationEngineMark(engine: model.selectedEngine)
+                            Text(engineStatusText)
+                        }.font(.system(size: 12)).foregroundStyle(MacVisualTokens.secondaryLabel)
+                    }
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain).help("账号与安全")
             Spacer()
             HStack(spacing: 8) {
                 Button { showEnginePicker.toggle() } label: {
@@ -789,7 +789,7 @@ struct TranslatorView: View {
         switch model.selectedEngine {
         case .apple: return "Apple 系统本机翻译"
         case .deepl: return "内容由 DeepL 在线处理"
-        case .sharedDeepL: return "公共体验 · 文字经 Yike 服务器交由 DeepL 处理"
+        case .sharedDeepL: return "由Yike服务器交由DeepL处理"
         }
     }
 
