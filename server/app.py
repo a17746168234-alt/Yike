@@ -9,7 +9,7 @@ class APIError(Exception):
         self.status, self.code, self.message = status, code, message
 
 class Service:
-    def __init__(self, path, pepper, key='', enabled=False, gift=200000, pool_limit=4000000, upstream=None, mailer=None, captcha=None):
+    def __init__(self, path, pepper, key='', enabled=False, gift=200000, pool_limit=4000000, upstream=None, mailer=None):
         self.path, self.pepper, self.key = str(path), pepper.encode(), key
         self.enabled, self.gift, self.pool_limit = enabled, gift, pool_limit
         self.upstream = upstream or self.deepl
@@ -32,7 +32,7 @@ class Service:
             db.execute("UPDATE requests SET status='failed' WHERE status='pending'")
             db.commit()
         os.chmod(path, 0o600)
-        self.email_auth=EmailAuth(self, APIError, mailer=mailer, captcha=captcha)
+        self.email_auth=EmailAuth(self, APIError, mailer=mailer)
 
     @contextlib.contextmanager
     def db(self):
@@ -173,6 +173,8 @@ class Service:
         finally: self.translation_lock.release()
 
     def dispatch(self, method, path, body, token, ip):
+        if path=='/captcha' or path.startswith('/v2/captcha/'):
+            raise APIError(410,'upgrade_required','人机验证已移除，请更新 Yike 后直接登录或注册。')
         if method=='GET' and path=='/health': return {'ok':True}
         if method=='GET' and path=='/v1/config': return self.config()
         if method=='POST' and path.startswith('/v2/'): return self.email_auth.dispatch(path,body,token,ip)
@@ -207,17 +209,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self): self.handle_api()
     def handle_api(self):
         self.connection.settimeout(8)
-        if self.command=='GET' and self.path.split('?')[0]=='/captcha':
-            page=(Path(__file__).parent/'captcha.html').read_text().replace('__SITEKEY__',os.environ.get('TURNSTILE_SITEKEY',''))
-            encoded=page.encode()
-            self.send_response(200)
-            self.send_header('Content-Type','text/html; charset=utf-8')
-            self.send_header('Content-Length',str(len(encoded)))
-            self.send_header('Cache-Control','no-store')
-            self.send_header('Referrer-Policy','no-referrer')
-            self.send_header('X-Content-Type-Options','nosniff')
-            self.send_header('Content-Security-Policy',"default-src 'none'; script-src 'unsafe-inline' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; style-src 'unsafe-inline'")
-            self.end_headers(); self.wfile.write(encoded); return
         try:
             if self.headers.get('Transfer-Encoding'): raise APIError(400,'body','请求格式不支持。')
             length=int(self.headers.get('Content-Length','0'))
@@ -255,7 +246,6 @@ if __name__=='__main__':
         while True:
             with service.db() as db:
                 db.execute('UPDATE requests SET result=NULL WHERE created<?',(int(time.time())-600,))
-                db.execute('DELETE FROM browser_captcha WHERE expires<?',(int(time.time()),))
                 db.execute('DELETE FROM email_codes WHERE expires<?',(int(time.time()),))
                 db.execute('DELETE FROM sessions WHERE expires<?',(int(time.time()),))
                 db.execute('DELETE FROM limits WHERE stamp<?',(int(time.time())-32*86400,))

@@ -1,16 +1,16 @@
-"""Verified-email auth. No plaintext passwords, OTPs, or captcha tokens are stored."""
-import hashlib, hmac, json, os, re, secrets, smtplib, ssl, time, urllib.request
+"""Verified-email auth. No plaintext passwords or OTPs are stored."""
+import hashlib, hmac, json, os, re, secrets, smtplib, ssl, time
 from email.message import EmailMessage
 
 class EmailAuth:
-    def __init__(self, service, error, *, mailer=None, captcha=None):
+    def __init__(self, service, error, *, mailer=None):
         self.s, self.Error = service, error
-        self.mailer, self.captcha = mailer or self.send_mail, captcha or self.verify_captcha
+        self.mailer = mailer or self.send_mail
         with self.s.db() as db:
             columns = {r['name'] for r in db.execute('PRAGMA table_info(users)')}
             if 'email' not in columns: db.execute('ALTER TABLE users ADD COLUMN email TEXT')
             db.execute('CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(email)')
-            db.execute('CREATE TABLE IF NOT EXISTS browser_captcha(id TEXT PRIMARY KEY,expires INTEGER NOT NULL,verified INTEGER NOT NULL DEFAULT 0)')
+            db.execute('DROP TABLE IF EXISTS browser_captcha')
             db.execute('''CREATE TABLE IF NOT EXISTS email_codes(
                 id TEXT PRIMARY KEY,email TEXT NOT NULL,purpose TEXT NOT NULL,user_id TEXT,
                 code_hash TEXT NOT NULL,salt TEXT,password TEXT,expires INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0)''')
@@ -28,28 +28,6 @@ class EmailAuth:
     def password(self, value):
         if not isinstance(value,str) or not 10<=len(value)<=128: raise self.Error(400,'password','密码需为 10–128 位。')
         return value
-
-    def verify_captcha(self, token, ip):
-        if isinstance(token,str) and token.startswith('browser:'):
-            ticket=token[8:]
-            if len(ticket)>128: raise self.Error(400,'captcha','请重新完成人机验证。')
-            with self.s.db() as db:
-                db.execute('BEGIN IMMEDIATE')
-                row=db.execute('SELECT * FROM browser_captcha WHERE id=?',(self.s.digest(ticket),)).fetchone()
-                if not row or row['verified']!=1 or row['expires']<time.time():
-                    db.rollback(); raise self.Error(400,'captcha','人机验证未完成或已过期。')
-                db.execute('DELETE FROM browser_captcha WHERE id=?',(self.s.digest(ticket),)); db.commit()
-            return
-        secret=os.environ.get('TURNSTILE_SECRET','')
-        if not secret: raise self.Error(503,'auth_unavailable','人机验证暂不可用，请稍后再试。')
-        if not isinstance(token,str) or not 1<=len(token)<=2048: raise self.Error(400,'captcha','请先完成人机验证。')
-        req=urllib.request.Request('https://challenges.cloudflare.com/turnstile/v0/siteverify',
-            data=json.dumps({'secret':secret,'response':token,'remoteip':ip}).encode(),headers={'Content-Type':'application/json'})
-        try:
-            with urllib.request.urlopen(req,timeout=12) as response: result=json.load(response)
-        except Exception: raise self.Error(503,'captcha','无法核实人机验证，请重试。') from None
-        if result.get('success') is not True or result.get('hostname')!=os.environ.get('YIKE_AUTH_HOST','n5v1b.cn') or result.get('action')!='yike_auth':
-            raise self.Error(400,'captcha','人机验证未通过或已过期，请重新验证。')
 
     def send_mail(self,email,code,purpose):
         host=os.environ.get('SMTP_HOST',''); password=os.environ.get('SMTP_PASSWORD','')
@@ -72,30 +50,10 @@ class EmailAuth:
         return {'token':token,'account':self.s.account(user),'message':'登录成功。'}
 
     def dispatch(self,path,body,token,ip):
-        if path=='/v2/captcha/start':
-            self.s.rate('captcha-start:'+self.s.digest(ip),10,300)
-            ticket=secrets.token_urlsafe(32)
-            with self.s.db() as db:
-                db.execute('DELETE FROM browser_captcha WHERE expires<?',(int(time.time()),))
-                db.execute('INSERT INTO browser_captcha VALUES (?,?,0)',(self.s.digest(ticket),int(time.time())+300))
-            return {'ticket':ticket}
-        if path in ('/v2/captcha/status','/v2/captcha/complete'):
-            ticket=body.get('ticket')
-            if not isinstance(ticket,str) or not 32<=len(ticket)<=128: raise self.Error(400,'captcha','验证链接无效，请重新打开。')
-            with self.s.db() as db: row=db.execute('SELECT * FROM browser_captcha WHERE id=?',(self.s.digest(ticket),)).fetchone()
-            if not row or row['expires']<time.time(): raise self.Error(400,'captcha','验证链接已过期，请重新打开。')
-            if path.endswith('/complete'):
-                self.s.rate('captcha-complete:'+self.s.digest(ip),10,300)
-                captcha=body.get('captcha_token')
-                if not isinstance(captcha,str) or captcha.startswith('browser:'): raise self.Error(400,'captcha','验证码无效。')
-                self.verify_captcha(captcha,ip)
-                with self.s.db() as db: db.execute('UPDATE browser_captcha SET verified=1 WHERE id=? AND expires>?',(self.s.digest(ticket),int(time.time())))
-            return {'verified':bool(row['verified']) if path.endswith('/status') else True}
         if path=='/v2/login':
             self.s.rate('email-login:'+self.s.digest(ip),20,900)
             email=self.email(body.get('email')); password=self.password(body.get('password'))
             self.s.rate('email-login-name:'+self.s.digest(email),10,900)
-            self.captcha(body.get('captcha_token'),ip)
             if not self.s.auth_slots.acquire(blocking=False): raise self.Error(429,'busy','登录服务繁忙，请稍后再试。')
             try:
                 with self.s.db() as db:
@@ -109,7 +67,6 @@ class EmailAuth:
             email=self.email(body.get('email'))
             self.s.rate('email-send-ip:'+self.s.digest(ip),5,3600)
             self.s.rate('email-send:'+self.s.digest(email),1,60)
-            self.captcha(body.get('captcha_token'),ip)
             user=self.s.authenticate(token) if purpose=='bind' else None
             salt=password=None
             if purpose=='register':

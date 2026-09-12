@@ -4,11 +4,11 @@ Python 3.11+，标准库。生产实例 `/opt/yike-trial`，仅监听 `127.0.0.1
 
 ## 当前状态与领取规则
 
-Build 65 使用邮箱、密码、Cloudflare Turnstile 和六位邮箱验证码。只有完成邮箱验证后才创建账号并一次发放 **200,000 字符**。所有账号共用 **4,000,000 字符终身总预算**，按实际使用扣减，不按月重置，注册不预留公共预算。
+Build 67 使用邮箱、密码和六位邮箱验证码，不需要人机验证或打开浏览器。只有完成邮箱验证后才创建账号并一次发放 **200,000 字符**。所有账号共用 **4,000,000 字符终身总预算**，按实际使用扣减，不按月重置，注册不预留公共预算。
 
 旧用户名账号可使用现有登录会话绑定邮箱；验证成功后总赠额补齐到 200,000，已有消费保留。旧客户端的用户名注册/登录接口已关闭，避免绕过邮箱验证。未绑定邮箱的旧会话不能使用公共翻译。已退出的旧用户名账号可使用邮箱重新注册；旧账号数据保留但不会获得公共翻译权限。
 
-当前已部署独立的人机验证配置。**SMTP 发信服务和公共 DeepL 密钥由管理员另行配置，尚未完成真实收信与公共翻译验收。** 不读取客户端个人密钥，不复用四级网站的发信服务。
+**SMTP 发信服务和公共 DeepL 密钥由管理员另行配置，尚未完成真实收信与公共翻译验收。** 不读取客户端个人密钥，不复用四级网站的发信服务。
 
 一个验证过的邮箱只能领取一次。验证码10分钟有效、最多尝试5次，登录按IP和邮箱限流、发信同邮箱60秒一次，每IP每小时5次。Gmail 点号和加号别名合并处理；邮箱验证不等于真实身份认证，不能保证一个自然人只拥有一个邮箱。
 
@@ -47,24 +47,23 @@ curl --fail https://n5v1b.cn/yike-api/v1/config
 
 环境文件权限600；数据库 `/var/lib/yike-trial/accounts.sqlite3` 位于权限700的目录。使用SQLite backup API备份数据库，并私密备份环境文件。不要复制它们到源码或安装包，不要删库升级，不要同时启动多个服务进程。
 
-部署需要复制本目录的 `*.py`、`captcha.html`、service 和部署脚本到 `/opt/yike-trial`。`deploy.sh` 为当前 n5v1b.cn 配置设计，其他服务器需调整Nginx文件和插入点。升级先测试再重启，保留环境和数据库；Build65自动添加邮箱列与验证码表，不删除旧账号。
+部署需要复制本目录的 `*.py`、service 和部署脚本到 `/opt/yike-trial`。`deploy.sh` 为当前 n5v1b.cn 配置设计，其他服务器需调整Nginx文件和插入点。升级先测试再重启，保留环境和数据库；Build65自动添加邮箱列与验证码表，不删除旧账号。
 
-独立Turnstile组件必须绑定生产域名。服务器环境设置 `TURNSTILE_SITEKEY`、`TURNSTILE_SECRET`，客户端仅加载公开sitekey。必须执行Siteverify并核对 success、hostname=`n5v1b.cn`、action=`yike_auth`；不可使用测试密钥上线或仅靠客户端打勾。验证码组件经HTTPS加载到原生WKWebView。若内嵌组件卡住，可使用“在浏览器验证”；服务器签发随机5分钟票据，浏览器经Siteverify验证后回传，票据单次使用。浏览器验证在实机完成了真实服务器校验；内嵌组件是否成功受WebView与网络环境影响。
+Build 67 移除旧验证页面、回调和服务端校验；启动时仅清理废弃的人机验证票据表，账号、会话、邮箱验证码和额度记录保留。旧客户端访问已停用的验证入口会收到更新提示，应安装最新版。
 
 ## Windows / 其他客户端接口
 
-基地址如上，JSON请求；会话使用 `Authorization: Bearer <token>`，有效30天，放入系统凭据管理器。所有错误返回 `code` 和 `message`。Windows可复用服务接口，但需自行实现浏览器验证码组件；Apple引擎不支持Windows。
+基地址如上，JSON请求；会话使用 `Authorization: Bearer <token>`，有效30天，放入系统凭据管理器。所有错误返回 `code` 和 `message`。Windows可复用服务接口，无需浏览器验证组件；Apple引擎不支持Windows。
 
 | 方法与路径 | 请求与结果 |
 | --- | --- |
 | GET v1/config | enabled、gift、pool_limit、pool_remaining |
-| GET captcha | 真正的Turnstile组件；使用HTTPS页面获取token |
-| POST v2/login | email、password、captcha_token；返回token/account/message |
-| POST v2/register/send | email、password、captcha_token；返回challenge_id/message，无账号或赠额 |
+| POST v2/login | email、password；返回token/account/message |
+| POST v2/register/send | email、password；返回challenge_id/message，无账号或赠额 |
 | POST v2/register/verify | email、challenge_id、code；验证后返回token/account/message |
-| POST v2/reset/send | email、captcha_token；返回challenge_id/message |
+| POST v2/reset/send | email；返回challenge_id/message |
 | POST v2/reset/verify | email、challenge_id、code、new_password；撤销会话，重新登录 |
-| POST v2/bind/send | 旧会话 + email、captcha_token |
+| POST v2/bind/send | 旧会话 + email |
 | POST v2/bind/verify | 旧会话 + email、challenge_id、code；补齐总赠額，替换会话 |
 | GET v1/me | account包含email、username、granted、used、remaining |
 | POST v1/logout | 撤销当前会话 |
@@ -81,10 +80,4 @@ curl --fail https://n5v1b.cn/yike-api/v1/config
 python3 -m unittest discover -s server -p 'test_*.py' -v
 ```
 
-测试使用临时数据库和模拟邮件/上游，覆盖邮箱发放条件、重复/并发验证、过期/尝试上限、Turnstile校验、密码找回撤销会话、旧账号补齐、四密钥选择和不确定失败禁止换key重发。生产真实收信、真人交互和DeepL成功翻译须在管理员完成配置后另行验收。
-
-### Build 66 验证页面
-
-应用通过系统浏览器打开验证码页面并轮询服务端结果，故障排除在独立窗口中显示。浏览器页面的成功提示以服务端确认结果为准；错误和加载过慢提供明确提示与手动重试，验证链接和单次使用规则保持不变。
-
-页面回归：`node --test server/test_captcha_page.mjs`。
+测试使用临时数据库和模拟邮件/上游，覆盖邮箱发放条件、重复/并发验证、过期/尝试上限、无外部验证码调用、限流、升级保留账号、密码找回撤销会话、旧账号补齐、四密钥选择和不确定失败禁止换key重发。生产真实收信、真人交互和DeepL成功翻译须在管理员完成配置后另行验收。

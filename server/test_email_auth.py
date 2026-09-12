@@ -1,4 +1,4 @@
-import concurrent.futures, json, tempfile, unittest
+import concurrent.futures, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 from app import Service, APIError
@@ -6,18 +6,14 @@ from key_pool import DeepLKeyPool
 
 class EmailTests(unittest.TestCase):
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory(); self.sent=[]; self.consumed=set()
-        def captcha(token,ip):
-            if token!='human' or token in self.consumed: raise APIError(400,'captcha','captcha rejected')
-            self.consumed.add(token)
-        self.service=Service(Path(self.temp.name)/'db','s'*40,mailer=lambda *args:self.sent.append(args),captcha=captcha)
+        self.temp=tempfile.TemporaryDirectory(); self.sent=[]
+        self.service=Service(Path(self.temp.name)/'db','s'*40,mailer=lambda *args:self.sent.append(args))
         self.auth=self.service.email_auth; self.ip='127.0.0.1'
     def tearDown(self): self.temp.cleanup()
     def call(self,path,body,token=''):
         return self.service.dispatch('POST','/v2/'+path,body,token,self.ip)
     def send(self,email='hello@example.com',purpose='register',token=''):
-        self.consumed.clear()
-        return self.call(purpose+'/send',{'email':email,'password':'secure-password','captcha_token':'human'},token)
+        return self.call(purpose+'/send',{'email':email,'password':'secure-password'},token)
     def verify(self,challenge,email='hello@example.com',purpose='register',token='',code=None):
         return self.call(purpose+'/verify',{'email':email,'challenge_id':challenge['challenge_id'],'code':code or self.sent[-1][1],'new_password':'new-secure-password'},token)
     def error(self,code,fn):
@@ -31,15 +27,26 @@ class EmailTests(unittest.TestCase):
             self.assertNotEqual(record['code_hash'],self.sent[-1][1]); self.assertNotEqual(record['password'],'secure-password')
         result=self.verify(pending)
         self.assertEqual(result['account']['remaining'],200000)
-        self.consumed.clear()
-        login=self.call('login',{'email':'HELLO@example.com','password':'secure-password','captcha_token':'human'})
+        login=self.call('login',{'email':'HELLO@example.com','password':'secure-password'})
         self.assertEqual(login['account']['granted'],200000)
         self.error('code',lambda:self.verify(pending))
-    def test_captcha_required_replay_and_legacy_bypass(self):
-        self.error('captcha',lambda:self.call('register/send',{'email':'x@example.com','password':'secure-password','captcha_token':''}))
+    def test_register_and_login_do_not_require_captcha_or_external_calls(self):
+        with patch('urllib.request.urlopen',side_effect=AssertionError('unexpected network request')):
+            pending=self.send(); result=self.verify(pending)
+            login=self.call('login',{'email':'hello@example.com','password':'secure-password'})
+            self.assertEqual(login['account']['remaining'],200000)
+            self.assertEqual(login['account']['username'],result['account']['username'])
         self.error('upgrade_required',lambda:self.service.dispatch('POST','/v1/register',{'username':'aaaa','password':'secure-password'},'',self.ip))
+    def test_send_limits_still_apply_without_captcha(self):
         self.send()
-        self.error('captcha',lambda:self.call('register/send',{'email':'next@example.com','password':'secure-password','captcha_token':'human'}))
+        self.error('rate_limit',lambda:self.send())
+        for i in range(3): self.send(email=f'person{i}@example.com')
+        self.error('rate_limit',lambda:self.send(email='another@example.com'))
+    def test_password_and_login_limits_still_apply_without_captcha(self):
+        self.verify(self.send())
+        for _ in range(10):
+            self.error('invalid_credentials',lambda:self.call('login',{'email':'hello@example.com','password':'incorrect-password'}))
+        self.error('rate_limit',lambda:self.call('login',{'email':'hello@example.com','password':'secure-password'}))
     def test_bad_expired_and_exhausted_codes(self):
         pending=self.send()
         for _ in range(5): self.error('code',lambda:self.verify(pending,code='wrong1'))
@@ -55,8 +62,7 @@ class EmailTests(unittest.TestCase):
         with self.service.db() as db: db.execute('DELETE FROM limits')
         pending=self.send(purpose='reset'); self.verify(pending,purpose='reset')
         self.error('login_required',lambda:self.service.authenticate(account['token']))
-        self.consumed.clear()
-        login=self.call('login',{'email':'hello@example.com','password':'new-secure-password','captcha_token':'human'})
+        login=self.call('login',{'email':'hello@example.com','password':'new-secure-password'})
         self.assertEqual(login['account']['remaining'],200000)
     def test_existing_account_binding_tops_up_once_and_keeps_spend(self):
         account=self.service.auth('register',{'username':'legacy','password':'secure-password'},self.ip)
@@ -75,29 +81,18 @@ class EmailTests(unittest.TestCase):
             try: return self.verify(pending)['account']['remaining']
             except APIError: return 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as workers: self.assertEqual(sum(workers.map(verify,range(2))),200000)
-    def test_browser_verification_ticket_is_single_use_and_expires(self):
-        self.auth.captcha=self.auth.verify_captcha
-        ticket=self.call('captcha/start',{})['ticket']
-        self.error('captcha',lambda:self.auth.verify_captcha('browser:'+ticket,self.ip))
-        with self.service.db() as db: db.execute('UPDATE browser_captcha SET verified=1')
-        self.assertTrue(self.call('captcha/status',{'ticket':ticket})['verified'])
-        self.auth.verify_captcha('browser:'+ticket,self.ip)
-        self.error('captcha',lambda:self.auth.verify_captcha('browser:'+ticket,self.ip))
-        second=self.call('captcha/start',{})['ticket']
-        with self.service.db() as db: db.execute('UPDATE browser_captcha SET verified=1,expires=0')
-        self.error('captcha',lambda:self.auth.verify_captcha('browser:'+second,self.ip))
-
-    def test_siteverify_checks_hostname_action_and_success(self):
-        self.auth.captcha=self.auth.verify_captcha
-        class Response:
-            def __init__(self,value): self.value=json.dumps(value).encode()
-            def __enter__(self): return self
-            def __exit__(self,*args): pass
-            def read(self): return self.value
-        with patch.dict('os.environ',{'TURNSTILE_SECRET':'test','YIKE_AUTH_HOST':'n5v1b.cn'}):
-            for result in ({'success':False},{'success':True,'hostname':'attacker.test','action':'yike_auth'},{'success':True,'hostname':'n5v1b.cn','action':'wrong'}):
-                with patch('urllib.request.urlopen',return_value=Response(result)): self.error('captcha',lambda:self.auth.verify_captcha('token',self.ip))
-            with patch('urllib.request.urlopen',return_value=Response({'success':True,'hostname':'n5v1b.cn','action':'yike_auth'})): self.auth.verify_captcha('token',self.ip)
+    def test_retired_captcha_endpoints_request_client_update(self):
+        for method,path in [('GET','/captcha'),('POST','/v2/captcha/start'),('POST','/v2/captcha/status'),('POST','/v2/captcha/complete')]:
+            self.error('upgrade_required',lambda:self.service.dispatch(method,path,{},'',self.ip))
+    def test_migration_removes_only_challenge_table_and_preserves_accounts(self):
+        signed=self.verify(self.send())
+        with self.service.db() as db:
+            db.execute('CREATE TABLE browser_captcha(id TEXT PRIMARY KEY,expires INTEGER,verified INTEGER)')
+            db.execute("INSERT INTO browser_captcha VALUES ('obsolete',0,0)")
+        reloaded=Service(Path(self.temp.name)/'db','s'*40,mailer=lambda *args:self.sent.append(args))
+        self.assertEqual(reloaded.account(reloaded.authenticate(signed['token']))['remaining'],200000)
+        with reloaded.db() as db:
+            self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='browser_captcha'").fetchone())
 
 class KeyPoolTests(unittest.TestCase):
     def test_select_key_with_enough_quota_and_no_failure_fallback(self):

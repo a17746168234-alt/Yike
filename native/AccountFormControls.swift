@@ -81,39 +81,11 @@ struct AccountAuthenticationSheet: View {
                     .padding(.horizontal, 20).padding(.vertical, 18)
             }
         }
-        .frame(width: 520, height: 640)
+        .frame(width: 520, height: 540)
         .background { AdaptiveGlassBackdrop(materialOpacity: 0.92, tintOpacity: 0.16).ignoresSafeArea() }
         .onChange(of: account.account?.email) { email in
             if email != nil { dismiss() }
         }
-    }
-}
-
-struct CaptchaTroubleshootingSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Label("人机验证故障排除", systemImage: "questionmark.circle")
-                    .font(.system(size: 18, weight: .semibold))
-                Spacer()
-                Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
-            }
-            Divider()
-            Text("验证一直转圈，不代表密码或邮箱有问题。浏览器兼容性、网络连接或拦截扩展都可能影响验证。")
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 16) {
-                Label("返回登录页点击“开始验证”，在打开的浏览器中完成验证。", systemImage: "1.circle")
-                Label("如果浏览器仍卡住，可用最新版 Safari、Chrome 或 Edge 打开同一验证页面，并检查网页拦截扩展。", systemImage: "2.circle")
-                Label("检查网络是否稳定。不要在验证过程中切换代理或网络；连接恢复后重新验证。", systemImage: "3.circle")
-                Label("浏览器显示成功后返回 Yike。若链接已过期，或应用仍未同步，请取消等待后重新开始。", systemImage: "4.circle")
-            }
-            Text("验证链接约 5 分钟有效。请勿把含验证链接的浏览器地址分享给别人。")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
-        }
-        .font(.system(size: 13)).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
-        .padding(26).frame(width: 540)
-        .background { AdaptiveGlassBackdrop(materialOpacity: 0.92, tintOpacity: 0.16).ignoresSafeArea() }
     }
 }
 
