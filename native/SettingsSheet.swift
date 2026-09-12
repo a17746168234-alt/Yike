@@ -48,6 +48,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: TranslatorViewModel
+    @ObservedObject private var updater = UpdateManager.shared
     var openAccount = false
     @AppStorage("fanyi.appearance.mode") private var appearanceMode = "system"
     @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
@@ -319,10 +320,25 @@ struct SettingsSheet: View {
         settingsCard("关于与更新", icon: "info.circle") {
             LabeledContent("当前版本") { Text(versionText) }
             LabeledContent("开发者") { Text("本工具由null团队打造") }
-            Text("本次更新：全新分类设置、DeepL 密钥快捷帮助、中英文自动互译、逐字显示，以及菜单栏截图与语音悬浮翻译。")
+            Text("Yike 每天启动时自动检查一次更新，也可以在这里立即检查。")
                 .font(.system(size: 12))
                 .foregroundStyle(Color.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if !updater.status.isEmpty {
+                Text(updater.status)
+                    .font(.system(size: 12, weight: updater.hasUpdate ? .medium : .regular))
+                    .foregroundStyle(updater.hasUpdate ? Color.accentColor : Color.secondary)
+            }
+            HStack {
+                Button(updater.isChecking ? "正在检查…" : "检查更新") {
+                    Task { await updater.checkNow() }
+                }
+                .disabled(updater.isChecking)
+                if updater.hasUpdate {
+                    Button("立即更新") { Task { await updater.installNow() } }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
         }
         settingsCard("退出应用", icon: "power") {
             HStack {

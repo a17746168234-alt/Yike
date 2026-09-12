@@ -13,6 +13,7 @@ struct TranslatorView: View {
     @StateObject private var model = TranslatorViewModel.shared
     @ObservedObject private var profile = UserProfile.shared
     @ObservedObject private var trialAccount = SharedTrialAccount.shared
+    @ObservedObject private var updater = UpdateManager.shared
     @AppStorage("fanyi.appearance.mode") private var appearanceMode = "system"
     @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
     @Environment(\.colorScheme) private var colorScheme
@@ -86,6 +87,7 @@ struct TranslatorView: View {
         .onAppear {
             migrateAppearanceIfNeeded()
             applyAppearance()
+            Task { await updater.checkIfNeeded() }
             if model.hasDeepLKey {
                 Task { await model.fetchDeepLUsage() }
             }
@@ -159,6 +161,19 @@ struct TranslatorView: View {
         .onReceive(NotificationCenter.default.publisher(for: .translateSelectedText)) { notification in
             let processID = (notification.userInfo?["pid"] as? Int).map(pid_t.init)
             model.translateSelectedText(from: processID)
+        }
+        .alert("发现 Yike 新版本", isPresented: $updater.showsUpdateAlert) {
+            Button("暂不更新") { }
+            Button("立即更新") { Task { await updater.installNow() } }
+        } message: {
+            if let update = updater.latest {
+                Text("\(update.title)\n\n\(update.notes)")
+            }
+        }
+        .alert("更新没有完成", isPresented: $updater.showsInstallError) {
+            Button("知道了") { }
+        } message: {
+            Text(updater.status)
         }
     }
 

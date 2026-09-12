@@ -84,6 +84,13 @@ class EmailTests(unittest.TestCase):
     def test_retired_captcha_endpoints_request_client_update(self):
         for method,path in [('GET','/captcha'),('POST','/v2/captcha/start'),('POST','/v2/captcha/status'),('POST','/v2/captcha/complete')]:
             self.error('upgrade_required',lambda:self.service.dispatch(method,path,{},'',self.ip))
+    def test_update_manifest_is_public_and_validated(self):
+        manifest=Path(self.temp.name)/'update.json'
+        manifest.write_text('{"version":"1.6","build":69,"title":"Yike 1.6","notes":"test","download_url":"https://github.com/a17746168234-alt/Yike/releases/latest/download/Yike-macOS-arm64.dmg","sha256":"'+'a'*64+'"}')
+        self.service.update_path=manifest
+        self.assertEqual(self.service.dispatch('GET','/v1/update/macos',{},'',self.ip)['build'],69)
+        manifest.write_text('{}')
+        self.error('update_unavailable',lambda:self.service.dispatch('GET','/v1/update/macos',{},'',self.ip))
     def test_migration_removes_only_challenge_table_and_preserves_accounts(self):
         signed=self.verify(self.send())
         with self.service.db() as db:
