@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Keep the account form proportional inside the standard settings window.
+/// Keep the dedicated authentication form proportional in its own dialog.
 struct AccountFormScale: ViewModifier {
     @State private var contentHeight: CGFloat = 560
-    private let scale: CGFloat = 0.8
+    private let scale: CGFloat = 0.86
     func body(content: Content) -> some View {
         content
             .frame(width: 520)
@@ -16,6 +16,76 @@ struct AccountFormScale: ViewModifier {
             .scaleEffect(scale, anchor: .top)
             .frame(width: 520 * scale, height: contentHeight * scale, alignment: .top)
             .frame(maxWidth: .infinity, alignment: .top)
+    }
+}
+
+struct AccountSecuritySummary: View {
+    @ObservedObject private var account = SharedTrialAccount.shared
+    @ObservedObject var model: TranslatorViewModel
+    @State private var showAuthentication = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(spacing: 14) {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 38, weight: .light))
+                    .foregroundStyle(Color.accentColor.opacity(0.7))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(account.account?.email ?? account.account?.username ?? (account.isSignedIn ? "正在读取账号…" : "未登录"))
+                        .font(.system(size: 15, weight: .semibold)).textSelection(.enabled)
+                    if account.isSignedIn && account.account?.email == nil && account.account != nil {
+                        Text("待验证邮箱").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 12)
+                Button(account.isSignedIn ? "管理账号" : "登录") { showAuthentication = true }
+                    .buttonStyle(.borderedProminent).controlSize(.regular)
+            }
+            if let current = account.account {
+                Divider()
+                QuotaUsageView(title: "赠送额度", used: current.used, total: current.granted)
+            }
+            if account.feedbackIsError && !account.feedback.isEmpty {
+                HStack {
+                    Text(account.feedback).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("重试") { Task { await account.refresh() } }
+                }
+            }
+        }
+        .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        .task { await account.refresh() }
+        .sheet(isPresented: $showAuthentication) { AccountAuthenticationSheet(model: model) }
+    }
+}
+
+struct AccountAuthenticationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var account = SharedTrialAccount.shared
+    @ObservedObject var model: TranslatorViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label("Yike 账号", systemImage: "person.crop.circle")
+                    .font(.system(size: 17, weight: .semibold))
+                Spacer()
+                Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding(.horizontal, 24).padding(.vertical, 20)
+            Divider()
+            ScrollView {
+                TrialAccountSettings(model: model)
+                    .modifier(AccountFormScale())
+                    .padding(.horizontal, 20).padding(.vertical, 18)
+            }
+        }
+        .frame(width: 520, height: 640)
+        .background { AdaptiveGlassBackdrop(materialOpacity: 0.92, tintOpacity: 0.16).ignoresSafeArea() }
+        .onChange(of: account.account?.email) { email in
+            if email != nil { dismiss() }
+        }
     }
 }
 

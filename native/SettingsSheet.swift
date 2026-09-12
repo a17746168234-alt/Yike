@@ -196,8 +196,7 @@ struct SettingsSheet: View {
             ))
         }
         case .account:
-        TrialAccountSettings(model: model)
-            .modifier(AccountFormScale())
+        AccountSecuritySummary(model: model)
         case .deepl:
         if let feedback = model.deepLKeyFeedback { KeySaveFeedbackView(notice: feedback) }
         settingsCard("DeepL 密钥与帮助", icon: "key") {
