@@ -11,10 +11,12 @@ import Carbon.HIToolbox
 
 struct TranslatorView: View {
     @StateObject private var model = TranslatorViewModel.shared
+    @ObservedObject private var trialAccount = SharedTrialAccount.shared
     @AppStorage("fanyi.appearance.mode") private var appearanceMode = "system"
     @AppStorage("fanyi.glass.enabled") private var glassEnabled = true
     @Environment(\.colorScheme) private var colorScheme
     @State private var showHistory = false
+    @State private var showEnginePicker = false
     @State private var showDeepLSettings = false
     @State private var isImageDropTargeted = false
     @State private var imagePreview: ImagePreviewItem?
@@ -178,35 +180,7 @@ struct TranslatorView: View {
             }
             Spacer()
             HStack(spacing: 8) {
-                Menu {
-                    Button {
-                        model.setEngine(.apple)
-                    } label: {
-                        Label("Apple 系统翻译", systemImage: model.selectedEngine == .apple ? "checkmark" : "apple.logo")
-                    }
-                    Button {
-                        if model.hasDeepLKey {
-                            model.setEngine(.deepl)
-                        } else {
-                            showDeepLSettings = true
-                        }
-                    } label: {
-                        Label("DeepL 高质量", systemImage: model.selectedEngine == .deepl ? "checkmark" : "sparkles")
-                    }
-                    Button {
-                        model.setEngine(.sharedDeepL)
-                        if !SharedTrialAccount.shared.isSignedIn { model.showSharedAccount = true }
-                    } label: {
-                        Label("公共 DeepL 体验", systemImage: model.selectedEngine == .sharedDeepL ? "checkmark" : "gift")
-                    }
-                    Divider()
-                    if let usage = model.deepLUsage {
-                        Text("DeepL 用量：\(usage.characterCount) / \(usage.characterLimit) 字符（\(usage.usedPercentText)%）")
-                    }
-            Button(model.hasDeepLKey ? "更新 DeepL 密钥" : "设置 DeepL 密钥") {
-                        showDeepLSettings = true
-                    }
-                } label: {
+                Button { showEnginePicker.toggle() } label: {
                     HStack(spacing: 8) {
                         Circle()
                             .fill(model.selectedEngine == .apple ? accent : success)
@@ -220,8 +194,12 @@ struct TranslatorView: View {
                     .foregroundStyle(ink)
                     .macHoverControl(horizontalPadding: 10, height: 36)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
+                .task(id: model.selectedEngine) {
+                    if model.selectedEngine == .sharedDeepL { await trialAccount.refresh() }
+                    else if model.selectedEngine == .deepl { await model.fetchDeepLUsage() }
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showEnginePicker, arrowEdge: .bottom) { enginePicker }
                 .fixedSize()
 
                 Button(action: { showHistory = true }) {
@@ -754,6 +732,57 @@ struct TranslatorView: View {
         if model.isResultSpeechPaused { return "play.fill" }
         if model.isSpeakingResult { return "pause.fill" }
         return "speaker.wave.2"
+    }
+
+    private var enginePicker: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            engineChoice(.apple, symbol: "apple.logo")
+            engineChoice(.sharedDeepL, symbol: "sparkles")
+            engineChoice(.deepl, symbol: "key")
+            if model.selectedEngine != .apple {
+                Divider().padding(.vertical, 8)
+                if model.selectedEngine == .sharedDeepL {
+                    if let current = trialAccount.account {
+                        QuotaUsageView(title: "体验额度", used: current.used, total: current.granted)
+                    } else {
+                        Text(trialAccount.isSignedIn ? "正在获取体验额度…" : "登录后查看体验额度")
+                            .font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    Button("账号与安全") { showEnginePicker = false; model.showSharedAccount = true }
+                        .padding(.top, 9)
+                } else {
+                    if let usage = model.deepLUsage {
+                        QuotaUsageView(title: "个人额度", used: usage.characterCount, total: usage.characterLimit)
+                    } else { Text("个人额度暂未获取").font(.system(size: 12)).foregroundStyle(.secondary) }
+                    Button(model.hasDeepLKey ? "更新 DeepL 密钥" : "设置 DeepL 密钥") {
+                        showEnginePicker = false; showDeepLSettings = true
+                    }.padding(.top, 9)
+                }
+            }
+        }
+        .buttonStyle(.plain).padding(16).frame(width: 304)
+        .task {
+            if model.selectedEngine == .sharedDeepL { await trialAccount.refresh() }
+            else if model.selectedEngine == .deepl { await model.fetchDeepLUsage() }
+        }
+    }
+
+    private func engineChoice(_ engine: TranslationEngine, symbol: String) -> some View {
+        Button {
+            showEnginePicker = false
+            if engine == .deepl && !model.hasDeepLKey { showDeepLSettings = true; return }
+            model.setEngine(engine)
+            if engine == .sharedDeepL && !trialAccount.isSignedIn { model.showSharedAccount = true }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).frame(width: 20).foregroundStyle(.secondary)
+                Text(engine.name).font(.system(size: 13))
+                Spacer()
+                if model.selectedEngine == engine { Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.accentColor) }
+            }.padding(.horizontal, 9).frame(height: 36)
+                .background(model.selectedEngine == engine ? Color.accentColor.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+        }.accessibilityLabel(engine.name)
     }
 
     private var engineStatusText: String {

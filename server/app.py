@@ -1,13 +1,15 @@
 """Yike account and shared DeepL trial service. Python 3.11+, standard library only."""
 import contextlib, hashlib, hmac, http.server, json, os, re, secrets, sqlite3, threading, time, urllib.request, urllib.error, uuid
 from pathlib import Path
+from email_auth import EmailAuth
+from key_pool import DeepLKeyPool
 
 class APIError(Exception):
     def __init__(self, status, code, message):
         self.status, self.code, self.message = status, code, message
 
 class Service:
-    def __init__(self, path, pepper, key='', enabled=False, gift=50000, pool_limit=1000000, upstream=None):
+    def __init__(self, path, pepper, key='', enabled=False, gift=200000, pool_limit=4000000, upstream=None, mailer=None, captcha=None):
         self.path, self.pepper, self.key = str(path), pepper.encode(), key
         self.enabled, self.gift, self.pool_limit = enabled, gift, pool_limit
         self.upstream = upstream or self.deepl
@@ -30,6 +32,7 @@ class Service:
             db.execute("UPDATE requests SET status='failed' WHERE status='pending'")
             db.commit()
         os.chmod(path, 0o600)
+        self.email_auth=EmailAuth(self, APIError, mailer=mailer, captcha=captcha)
 
     @contextlib.contextmanager
     def db(self):
@@ -46,14 +49,14 @@ class Service:
         now = int(time.time())
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            db.execute('DELETE FROM limits WHERE stamp < ?', (now-86400,))
+            db.execute('DELETE FROM limits WHERE stamp < ?', (now-32*86400,))
             count = db.execute('SELECT COUNT(*) FROM limits WHERE bucket=? AND stamp>?', (bucket, now-seconds)).fetchone()[0]
             if count >= maximum:
                 db.rollback(); raise APIError(429,'rate_limit','操作过于频繁，请稍后再试。')
             db.execute('INSERT INTO limits VALUES (?,?)',(bucket,now)); db.commit()
 
     def account(self, user):
-        return {'username':user['name'], 'granted':user['credit'], 'used':user['spent'], 'remaining':max(0,user['credit']-user['spent']), 'grant_policy':'once'}
+        return {'username':user['email'] or user['name'], 'email':user['email'], 'granted':user['credit'], 'used':user['spent'], 'remaining':max(0,user['credit']-user['spent']), 'grant_policy':'once'}
 
     def authenticate(self, token):
         if not isinstance(token,str) or len(token)>128: raise APIError(401,'login_required','请先登录 Yike 账号领取体验额度。')
@@ -84,7 +87,7 @@ class Service:
                     db.execute('BEGIN IMMEDIATE')
                     if db.execute('SELECT COUNT(*) FROM users').fetchone()[0]>=10000:
                         db.rollback(); raise APIError(503,'registration_paused','本轮体验注册已满，请稍后再试。')
-                    try: db.execute('INSERT INTO users VALUES (?,?,?,?,?,0)',(str(uuid.uuid4()),name,salt,hashed,self.gift))
+                    try: db.execute('INSERT INTO users(id,name,salt,password,credit,spent) VALUES (?,?,?,?,?,0)',(str(uuid.uuid4()),name,salt,hashed,self.gift))
                     except sqlite3.IntegrityError:
                         db.rollback(); raise APIError(409,'username_exists','账号名已被使用，请换一个或直接登录。')
                     db.commit()
@@ -106,6 +109,7 @@ class Service:
         with urllib.request.urlopen(req,timeout=20) as response: return json.load(response)
 
     def translate(self, user, body):
+        if not user['email']: raise APIError(403,'email_required','请在账号与安全中验证邮箱后使用赠送额度。')
         if not self.enabled or not self.key: raise APIError(503,'shared_unavailable','公共 DeepL 尚未开启，请使用 Apple 翻译或填写自己的密钥。')
         texts, source, target=body.get('text'),body.get('source'),body.get('target')
         sources={'en':'EN','zh-CN':'ZH','ja':'JA','ko':'KO'}
@@ -171,7 +175,8 @@ class Service:
     def dispatch(self, method, path, body, token, ip):
         if method=='GET' and path=='/health': return {'ok':True}
         if method=='GET' and path=='/v1/config': return self.config()
-        if method=='POST' and path in ('/v1/register','/v1/login'): return self.auth(path.rsplit('/',1)[1],body,ip)
+        if method=='POST' and path.startswith('/v2/'): return self.email_auth.dispatch(path,body,token,ip)
+        if method=='POST' and path in ('/v1/register','/v1/login'): raise APIError(426,'upgrade_required','请更新 Yike，使用邮箱验证注册或登录。')
         user=self.authenticate(token)
         if method=='GET' and path=='/v1/me':
             with self.db() as db: db.execute('UPDATE requests SET result=NULL WHERE created<?',(int(time.time())-600,))
@@ -202,6 +207,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self): self.handle_api()
     def handle_api(self):
         self.connection.settimeout(8)
+        if self.command=='GET' and self.path.split('?')[0]=='/captcha':
+            page=(Path(__file__).parent/'captcha.html').read_text().replace('__SITEKEY__',os.environ.get('TURNSTILE_SITEKEY',''))
+            encoded=page.encode()
+            self.send_response(200)
+            self.send_header('Content-Type','text/html; charset=utf-8')
+            self.send_header('Content-Length',str(len(encoded)))
+            self.send_header('Cache-Control','no-store')
+            self.send_header('Referrer-Policy','no-referrer')
+            self.send_header('X-Content-Type-Options','nosniff')
+            self.send_header('Content-Security-Policy',"default-src 'none'; script-src 'unsafe-inline' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; style-src 'unsafe-inline'")
+            self.end_headers(); self.wfile.write(encoded); return
         try:
             if self.headers.get('Transfer-Encoding'): raise APIError(400,'body','请求格式不支持。')
             length=int(self.headers.get('Content-Length','0'))
@@ -230,14 +246,19 @@ if __name__=='__main__':
     pepper=os.environ.get('YIKE_SECRET','')
     if len(pepper)<32: raise SystemExit('YIKE_SECRET must contain at least 32 random characters')
     service=Service(os.environ.get('YIKE_DB','/var/lib/yike-trial/accounts.sqlite3'),pepper,
-        key=os.environ.get('DEEPL_API_KEY',''),enabled=os.environ.get('YIKE_PUBLIC_ENABLED')=='1',gift=int(os.environ.get('YIKE_TRIAL_GIFT','50000')))
+        key=os.environ.get('DEEPL_API_KEY',''),enabled=os.environ.get('YIKE_PUBLIC_ENABLED')=='1',gift=200000,pool_limit=4000000)
+    keys=json.loads(os.environ.get('DEEPL_API_KEYS','[]'))
+    if keys:
+        service.upstream=DeepLKeyPool(keys); service.key='configured-pool'
     server=http.server.ThreadingHTTPServer(('127.0.0.1',int(os.environ.get('YIKE_PORT','8093'))),Handler)
     def cleanup():
         while True:
             with service.db() as db:
                 db.execute('UPDATE requests SET result=NULL WHERE created<?',(int(time.time())-600,))
+                db.execute('DELETE FROM browser_captcha WHERE expires<?',(int(time.time()),))
+                db.execute('DELETE FROM email_codes WHERE expires<?',(int(time.time()),))
                 db.execute('DELETE FROM sessions WHERE expires<?',(int(time.time()),))
-                db.execute('DELETE FROM limits WHERE stamp<?',(int(time.time())-86400,))
+                db.execute('DELETE FROM limits WHERE stamp<?',(int(time.time())-32*86400,))
             time.sleep(60)
     threading.Thread(target=cleanup,daemon=True).start()
     server.daemon_threads=True; server.service=service

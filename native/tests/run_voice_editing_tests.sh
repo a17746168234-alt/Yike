@@ -13,7 +13,7 @@ main.write_text(main.read_text().split('@main\nstruct TranslationApp: App')[0])
 model=p/'src/TranslatorViewModel.swift'
 s=model.read_text()
 # Never contact DeepL with the fixture key or modify production account usage.
-s=s.replace('Task { await self.fetchDeepLUsage() }', '// Usage fetch suppressed in isolated tests.')
+s=s.replace('Task { await self.refreshSelectedEngineUsage() }', '// Usage fetch suppressed in isolated tests.')
 model.write_text(s)
 info={'CFBundleIdentifier':'cn.yike.voiceeditingtests','CFBundleExecutable':'VoiceEditingTests','CFBundleName':'VoiceEditingTests','CFBundlePackageType':'APPL'}
 (p/'VoiceEditingTests.app/Contents/Info.plist').write_bytes(plistlib.dumps(info))

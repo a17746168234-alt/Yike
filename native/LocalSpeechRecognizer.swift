@@ -185,6 +185,7 @@ final class LocalSpeechRecognizer {
         throw LocalSpeechError.downloadSourcesFailed(failures.joined(separator: "；"))
     }
 
+    private var validatedModification: Date?
     private var process: Process?
     private var deadline: Task<Void, Never>?
     private let selectedModelURL: URL
@@ -203,7 +204,11 @@ final class LocalSpeechRecognizer {
 
     func transcribe(audioURL: URL) async throws -> LocalSpeechResult {
         try Task.checkCancellation()
-        try Self.validateModel(at: selectedModelURL)
+        let attributes = try selectedModelURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        if validatedModification == nil || validatedModification != attributes.contentModificationDate || attributes.fileSize != Self.modelBytes {
+            try Self.validateModel(at: selectedModelURL)
+            validatedModification = attributes.contentModificationDate
+        }
         guard let engine = selectedEngineURL else { throw LocalSpeechError.missingEngine }
         let prefix = audioURL.deletingPathExtension().appendingPathExtension("result")
         let json = prefix.appendingPathExtension("json")
@@ -238,5 +243,35 @@ enum VoiceMeter {
     static func normalized(decibels: Float) -> Float {
         guard decibels.isFinite else { return 0 }
         return min(1, max(0, (decibels + 55) / 45))
+    }
+}
+
+/// AVAudioRecorder updates WAV lengths when recording stops. Repair a private
+/// snapshot so Whisper can read all PCM captured so far without stopping the mic.
+enum LiveWaveSnapshot {
+    static func data(from recording: Data) throws -> Data {
+        guard recording.count >= 44, String(data: recording[0..<4], encoding: .ascii) == "RIFF",
+              String(data: recording[8..<12], encoding: .ascii) == "WAVE" else { throw LocalSpeechError.noSpeech }
+        var data = recording
+        func size(at offset: Int) -> Int {
+            (0..<4).reduce(0) { $0 | (Int(data[offset + $1]) << (8 * $1)) }
+        }
+        func put(_ value: Int, at offset: Int) {
+            for i in 0..<4 { data[offset+i] = UInt8((value >> (8*i)) & 255) }
+        }
+        var offset = 12
+        while offset + 8 <= data.count {
+            if String(data: data[offset..<offset+4], encoding: .ascii) == "data" {
+                let count = (data.count - offset - 8) / 2 * 2
+                guard count >= 16000 else { throw LocalSpeechError.noSpeech }
+                data = data.prefix(offset + 8 + count)
+                put(count, at: offset+4); put(data.count-8, at: 4)
+                return data
+            }
+            let length = size(at: offset+4)
+            guard length <= data.count-offset-8 else { throw LocalSpeechError.noSpeech }
+            offset += 8 + length + (length % 2)
+        }
+        throw LocalSpeechError.noSpeech
     }
 }

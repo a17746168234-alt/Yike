@@ -9,7 +9,7 @@ if [[ ! -f /etc/yike-trial.env ]]; then
 import os, secrets
 fd=os.open('/etc/yike-trial.env',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
 with os.fdopen(fd,'w') as f:
-    f.write('YIKE_SECRET='+secrets.token_hex(32)+'\nYIKE_PUBLIC_ENABLED=0\nYIKE_TRIAL_GIFT=50000\nDEEPL_API_KEY=\n')
+    f.write('YIKE_SECRET='+secrets.token_hex(32)+'\nYIKE_PUBLIC_ENABLED=0\nYIKE_TRIAL_GIFT=200000\nDEEPL_API_KEY=\n')
 PY
 fi
 install -m 644 yike-trial.service /etc/systemd/system/yike-trial.service

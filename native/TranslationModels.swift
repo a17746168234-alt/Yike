@@ -19,8 +19,8 @@ enum TranslationEngine: String, CaseIterable, Identifiable {
     var name: String {
         switch self {
         case .apple: return "Apple 系统翻译"
-        case .deepl: return "DeepL 高质量"
-        case .sharedDeepL: return "公共 DeepL 体验"
+        case .deepl: return "DeepL（个人接入）"
+        case .sharedDeepL: return "DeepL 高质量翻译"
         }
     }
 
@@ -28,7 +28,7 @@ enum TranslationEngine: String, CaseIterable, Identifiable {
         switch self {
         case .apple: return "Apple 翻译"
         case .deepl: return "DeepL"
-        case .sharedDeepL: return "公共 DeepL"
+        case .sharedDeepL: return "DeepL"
         }
     }
 }

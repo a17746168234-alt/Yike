@@ -1,8 +1,10 @@
 import SwiftUI
 import Foundation
+import WebKit
 
 struct TrialAccount: Codable {
     let username: String
+    let email: String?
     let granted: Int
     let used: Int
     let remaining: Int
@@ -35,7 +37,7 @@ final class SharedTrialAccount: ObservableObject {
     private let keychain = KeychainTextStore(service: SecureKeyStore.applicationID + ".yike-account", account: "session")
     private var pendingRequests: [Data: String] = [:]
     var isSignedIn: Bool { !token.isEmpty }
-    private var baseURL: URL? {
+    var baseURL: URL? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: "YikeTrialAPIBaseURL") as? String,
               let url = URL(string: value), url.scheme == "https", url.host != nil else { return nil }
         return url
@@ -85,16 +87,60 @@ final class SharedTrialAccount: ObservableObject {
         }
     }
 
-    func signIn(username: String, password: String, register: Bool) async {
+    private struct AuthResponse: Decodable { let token: String; let account: TrialAccount; let message: String }
+    struct EmailChallenge: Decodable { let challenge_id: String; let message: String }
+    private func accept(_ response: AuthResponse) throws {
+        try keychain.save(response.token)
+        authRevision = UUID(); token = response.token; account = response.account; pendingRequests.removeAll()
+        feedback = response.message; feedbackIsError = false
+    }
+    func signIn(email: String, password: String, captcha: String) async {
         guard !busy else { return }
         busy = true; feedback = ""; defer { busy = false }
         do {
-            struct Response: Decodable { let token: String; let account: TrialAccount; let message: String }
-            let response: Response = try await request(register ? "v1/register" : "v1/login", method: "POST", body: ["username": username, "password": password], authenticated: false)
-            try keychain.save(response.token)
-            authRevision = UUID(); token = response.token; account = response.account; pendingRequests.removeAll()
-            feedback = response.message; feedbackIsError = false
+            let response: AuthResponse = try await request("v2/login", method: "POST", body: ["email":email,"password":password,"captcha_token":captcha], authenticated: false)
+            try accept(response)
         } catch { feedback = error.localizedDescription; feedbackIsError = true }
+    }
+    func sendCode(email: String, password: String, purpose: String, captcha: String) async -> String? {
+        guard !busy else { return nil }
+        busy = true; feedback = ""; defer { busy = false }
+        do {
+            let response: EmailChallenge = try await request("v2/\(purpose)/send", method: "POST", body: ["email":email,"password":password,"captcha_token":captcha], authenticated: purpose == "bind")
+            feedback = response.message; feedbackIsError = false
+            return response.challenge_id
+        } catch { feedback = error.localizedDescription; feedbackIsError = true; return nil }
+    }
+    func verify(email: String, code: String, challenge: String, purpose: String, password: String) async -> Bool {
+        guard !busy else { return false }
+        busy = true; feedback = ""; defer { busy = false }
+        do {
+            let body: [String:Any] = ["email":email,"code":code,"challenge_id":challenge,"new_password":password]
+            if purpose == "reset" {
+                struct Response: Decodable { let message: String }
+                let response: Response = try await request("v2/reset/verify", method: "POST", body: body, authenticated: false)
+                feedback = response.message; feedbackIsError = false
+            } else {
+                let response: AuthResponse = try await request("v2/\(purpose)/verify", method: "POST", body: body, authenticated: purpose == "bind")
+                try accept(response)
+            }
+            return true
+        } catch { feedback = error.localizedDescription; feedbackIsError = true; return false }
+    }
+
+    func browserVerification() async throws -> String {
+        struct Start: Decodable { let ticket: String }
+        struct Status: Decodable { let verified: Bool }
+        let start: Start = try await request("v2/captcha/start", method: "POST", body: [:], authenticated: false)
+        guard let baseURL, var url = URLComponents(url: baseURL.appendingPathComponent("captcha"), resolvingAgainstBaseURL: false) else { throw URLError(.badURL) }
+        url.fragment = start.ticket
+        guard let destination = url.url, NSWorkspace.shared.open(destination) else { throw URLError(.badURL) }
+        for _ in 0..<100 {
+            try await Task.sleep(for: .seconds(3))
+            let status: Status = try await request("v2/captcha/status", method: "POST", body: ["ticket":start.ticket], authenticated: false)
+            if status.verified { return "browser:" + start.ticket }
+        }
+        throw TrialServiceError(code: "captcha", message: "验证已过期，请重新打开。")
     }
 
     private func clearSession() {
@@ -147,73 +193,204 @@ final class SharedTrialAccount: ObservableObject {
     }
 }
 
+struct TrialCaptchaView: NSViewRepresentable {
+    let url: URL
+    @Binding var token: String
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        config.userContentController.add(context.coordinator, name: "yikeCaptcha")
+        let web = WKWebView(frame: .zero, configuration: config)
+        web.navigationDelegate = context.coordinator
+        web.setValue(false, forKey: "drawsBackground")
+        web.load(URLRequest(url: url)); return web
+    }
+    func updateNSView(_ view: WKWebView, context: Context) { context.coordinator.parent = self }
+    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+        view.stopLoading(); view.configuration.userContentController.removeScriptMessageHandler(forName: "yikeCaptcha")
+    }
+    class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+        var parent: TrialCaptchaView
+        init(parent: TrialCaptchaView) { self.parent = parent }
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.frameInfo.isMainFrame,
+                  message.frameInfo.securityOrigin.host == parent.url.host,
+                  message.frameInfo.securityOrigin.protocol == "https",
+                  let value = message.body as? String, value.count <= 2048 else { return }
+            parent.token = value
+        }
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            guard let url = action.request.url else { decisionHandler(.cancel); return }
+            if action.targetFrame?.isMainFrame == false && (url.absoluteString == "about:blank" || url.absoluteString.hasPrefix("blob:https://challenges.cloudflare.com/")) {
+                decisionHandler(.allow); return
+            }
+            guard url.scheme == "https", url.host == parent.url.host || url.host == "challenges.cloudflare.com" else { decisionHandler(.cancel); return }
+            decisionHandler(.allow)
+        }
+    }
+}
+
 struct TrialAccountSettings: View {
     @ObservedObject private var account = SharedTrialAccount.shared
     @ObservedObject var model: TranslatorViewModel
-    @State private var registering = false
-    @State private var username = ""
+    @State private var mode = "login"
+    @State private var email = ""
     @State private var password = ""
     @State private var confirmation = ""
-    @State private var oldPassword = ""
-    @State private var newPassword = ""
-    @State private var changingPassword = false
-    @State private var accepted = false
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if let current = account.account {
-                Label(current.username, systemImage: "person.crop.circle")
-                    .font(.system(size: 16, weight: .semibold))
-                LabeledContent("我的体验余额") { Text("\(current.remaining.formatted()) / \(current.granted.formatted()) 字符") }
-                ProgressView(value: Double(current.remaining), total: Double(max(1,current.granted)))
-                Text("注册赠送 5 万字符，公共池总计 100 万字符。按实际使用先到先用，用完即止；不自动续赠。").font(.system(size: 12)).foregroundStyle(.secondary)
-                HStack {
-                    Button("使用公共 DeepL") { model.setEngine(.sharedDeepL) }
-                        .disabled(account.configuration?.enabled != true || current.remaining == 0)
-                    Button("刷新额度") { Task { await account.refresh() } }
-                    Button("修改密码") { changingPassword.toggle() }
-                    Button("退出登录") { model.setEngine(.apple); Task { await account.logout() } }
+    @State private var code = ""
+    @State private var challenge = ""
+    @State private var captcha = ""
+    @State private var captchaID = UUID()
+    @State private var resendAfter = Date.distantPast
+    @State private var privacy = false
+    @State private var browserTask: Task<Void, Never>?
+    @State private var browserWaiting = false
+    private var bindingEmail: Bool { account.isSignedIn && account.account?.email == nil }
+    private var purpose: String { bindingEmail ? "bind" : (mode == "forgot" ? "reset" : "register") }
+    private var verified: Bool { account.account?.email != nil }
+    private var validEmail: Bool { email.contains("@") && email.contains(".") }
+    private func resetCaptcha() { browserTask?.cancel(); captcha = ""; captchaID = UUID() }
+    private func changeMode(_ value: String) {
+        mode = value; challenge = ""; code = ""; password = ""; confirmation = ""
+        account.feedback = ""; resetCaptcha()
+    }
+    private func accountTab(_ label: String, value: String) -> some View {
+        Button { changeMode(value) } label: {
+            Text(label).font(.system(size: 18, weight: mode == value ? .semibold : .regular))
+                .foregroundStyle(mode == value ? Color.primary : Color.secondary)
+                .padding(.vertical, 9)
+                .overlay(alignment: .bottom) {
+                    if mode == value { Capsule().fill(Color.accentColor).frame(height: 2) }
                 }
-                if changingPassword {
-                    SecureField("原密码", text: $oldPassword)
-                    SecureField("新密码（至少 10 位）", text: $newPassword)
-                    Button("更新密码并重新登录") {
-                        Task { await account.changePassword(old: oldPassword, new: newPassword); oldPassword = ""; newPassword = "" }
-                    }.disabled(newPassword.count < 10)
+        }.buttonStyle(.plain).accessibilityAddTraits(mode == value ? .isSelected : [])
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if verified, let current = account.account {
+                Label(current.email ?? current.username, systemImage: "person.crop.circle.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                QuotaUsageView(title: "体验额度", used: current.used, total: current.granted)
+                HStack {
+                    Button("刷新余额") { Task { await account.refresh() } }
+                    Button("重设密码") { Task { await account.logout(); changeMode("forgot") } }
+                    Button("退出登录") {
+                        Task { await account.logout(); if !account.isSignedIn && model.selectedEngine == .sharedDeepL { model.setEngine(.apple) } }
+                    }
                 }
             } else {
-                Text("注册领取 50,000 字符公共 DeepL 体验").font(.system(size: 15, weight: .semibold))
-                Text("共享池共 1,000,000 字符，用完为止。Apple 翻译及使用自己的 API 密钥无需注册。").font(.system(size: 12)).foregroundStyle(.secondary)
-                Picker("账号操作", selection: $registering) {
-                    Text("登录").tag(false)
-                    Text("注册账号").tag(true)
-                }.pickerStyle(.segmented)
-                TextField("账号名（4–24 位英文、数字或下划线）", text: $username)
-                SecureField("密码（至少 10 位）", text: $password)
-                if registering {
-                    SecureField("再次输入密码", text: $confirmation)
-                    Toggle("我已了解公共池规则与下方的数据处理说明", isOn: $accepted).font(.system(size: 11))
+                if bindingEmail {
+                    Text("验证邮箱").font(.system(size: 20, weight: .semibold))
+                    Text("验证后可使用邮箱登录，原账号额度补齐至 20 万字符。")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                } else if mode == "forgot" {
+                    Text("找回密码").font(.system(size: 20, weight: .semibold))
+                } else {
+                    HStack(spacing: 24) {
+                        accountTab("登录", value: "login")
+                        accountTab("注册", value: "register")
+                        Spacer()
+                    }.padding(.bottom, 4)
                 }
-                Button(registering ? "注册并领取体验额度" : "登录账号") {
-                    Task { await account.signIn(username: username.trimmingCharacters(in: .whitespacesAndNewlines), password: password, register: registering); password = ""; confirmation = "" }
-                }.disabled(username.count < 4 || password.count < 10 || (registering && (!accepted || password != confirmation)))
-                Text("请妥善保存账号和密码；当前不提供邮箱找回。").font(.system(size: 11)).foregroundStyle(.secondary)
+                AccountFormInput(title: "邮箱", hint: "请输入邮箱地址", symbol: "envelope", text: $email)
+                    .disabled(!challenge.isEmpty)
+                if challenge.isEmpty && !bindingEmail && mode != "forgot" {
+                    AccountFormInput(title: "密码", hint: "至少 10 位", symbol: "key", text: $password, secure: true)
+                    if mode == "register" { AccountFormInput(title: "确认密码", hint: "再次输入密码", symbol: "lock", text: $confirmation, secure: true) }
+                }
+                if !challenge.isEmpty {
+                    AccountFormInput(title: "邮箱验证码", hint: "请输入 6 位验证码", symbol: "number.square", text: $code)
+                    if purpose == "reset" {
+                        AccountFormInput(title: "新密码", hint: "至少 10 位", symbol: "key", text: $password, secure: true)
+                        AccountFormInput(title: "确认新密码", hint: "再次输入新密码", symbol: "lock", text: $confirmation, secure: true)
+                    }
+                    Button(purpose == "reset" ? "重设密码" : "验证并登录") {
+                        Task {
+                            if await account.verify(email: email, code: code, challenge: challenge, purpose: purpose, password: password) {
+                                challenge = ""; password = ""; confirmation = ""; code = ""; mode = "login"
+                            }
+                        }
+                    }.buttonStyle(AccountPrimaryButton())
+                        .disabled(code.count != 6 || (purpose == "reset" && (password.count < 10 || password != confirmation)))
+                    TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                        let seconds = max(0, Int(ceil(resendAfter.timeIntervalSince(timeline.date))))
+                        Button(seconds > 0 ? "\(seconds) 秒后可重发" : "重新发送验证码") { challenge = ""; code = ""; resetCaptcha() }
+                            .disabled(seconds > 0)
+                    }
+                } else {
+                    if mode == "login" && !bindingEmail {
+                        HStack {
+                            Spacer()
+                            Button("忘记密码？") { changeMode("forgot") }
+                                .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Color(red: 0.86, green: 0.31, blue: 0.34))
+                        }
+                    }
+                    if let url = account.baseURL?.appendingPathComponent("captcha") {
+                        VStack(spacing: 7) {
+                        if captcha.hasPrefix("browser:") {
+                            Label("人机验证通过", systemImage: "checkmark.circle.fill")
+                                .font(.system(size: 14, weight: .medium)).foregroundStyle(.green)
+                                .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                        } else {
+                            TrialCaptchaView(url: url, token: Binding(get: { captcha }, set: { if !captcha.hasPrefix("browser:") { captcha = $0 } })).id(captchaID).frame(height: 76)
+                        }
+                        HStack {
+                            Spacer()
+                            Button(browserWaiting ? "等待浏览器验证…" : "在浏览器验证") {
+                                browserTask?.cancel()
+                                browserWaiting = true
+                                account.feedback = ""
+                                browserTask = Task {
+                                    defer { browserWaiting = false }
+                                    do { captcha = try await account.browserVerification(); account.feedback = ""; account.feedbackIsError = false }
+                                    catch is CancellationError { }
+                                    catch { account.feedback = error.localizedDescription; account.feedbackIsError = true }
+                                }
+                            }.buttonStyle(.plain).disabled(browserWaiting)
+                            Button("重新验证") { browserTask?.cancel(); resetCaptcha() }.buttonStyle(.plain)
+                        }.font(.system(size: 11)).foregroundStyle(.secondary)
+                        }.padding(12)
+                            .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.07), lineWidth: 1))
+                    }
+                    Button(mode == "login" && !bindingEmail ? "登录" : "发送邮箱验证码") {
+                        Task {
+                            if mode == "login" && !bindingEmail { await account.signIn(email: email, password: password, captcha: captcha) }
+                            else if let id = await account.sendCode(email: email, password: password, purpose: purpose, captcha: captcha) {
+                                challenge = id; resendAfter = Date().addingTimeInterval(60); password = ""; confirmation = ""
+                            }
+                            resetCaptcha()
+                        }
+                    }.buttonStyle(AccountPrimaryButton())
+                        .disabled(!validEmail || captcha.isEmpty || (!bindingEmail && mode != "forgot" && password.count < 10) || (mode == "register" && password != confirmation))
+                }
+                HStack {
+                    if !bindingEmail && mode == "forgot" {
+                        Button("返回登录") { changeMode("login") }.foregroundStyle(Color.accentColor)
+                    } else if bindingEmail { Button("退出账号") { Task { await account.logout() } } }
+                    Spacer()
+                    Button("隐私说明") { privacy = true }
+                }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("邮箱验证注册，赠送 20 万字符翻译额度。")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
             }
             if account.busy { ProgressView().controlSize(.small) }
             if !account.feedback.isEmpty {
                 Label(account.feedback, systemImage: account.feedbackIsError ? "exclamationmark.circle" : "checkmark.circle")
                     .font(.system(size: 12)).foregroundStyle(account.feedbackIsError ? Color.orange : Color.green)
             }
-            if let config = account.configuration {
-                Divider()
-                LabeledContent("公共池预算剩余") { Text("\(config.pool_remaining.formatted()) 字符") }
-                if !config.enabled { Text(config.message).font(.system(size: 12)).foregroundStyle(.secondary) }
-            }
-            Divider()
-            Text("公共翻译会将文字经 Yike 服务器发送到 DeepL。服务器保存账号、密码摘要和额度记录，不保存原文；为避免重复扣额，译文缓存有效期为 10 分钟，过期后定期清理。共享池也受 DeepL 实际可用额度限制。").font(.system(size: 11)).foregroundStyle(.secondary)
         }
-        .textFieldStyle(.roundedBorder)
-        .buttonStyle(.bordered)
-        .disabled(account.busy)
+        .padding(24).frame(maxWidth: 520, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.primary.opacity(0.05), lineWidth: 1))
+        .frame(maxWidth: .infinity, alignment: .center)
+        .textFieldStyle(.roundedBorder).controlSize(.large)
+        .buttonStyle(.bordered).disabled(account.busy)
         .task { await account.refresh() }
+        .onDisappear { browserTask?.cancel() }
+        .popover(isPresented: $privacy) {
+            Text("邮箱仅用于账号验证与安全通知。DeepL 高质量翻译将文字经 Yike 服务器发送至 DeepL；服务器保存账号和额度记录，译文短时缓存用于防止重复扣额。赠送额度仅领取一次，受服务可用余额限制。人机验证由 Cloudflare 提供。")
+                .font(.system(size: 12)).padding(20).frame(width: 320)
+        }
     }
 }

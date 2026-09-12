@@ -1,0 +1,20 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yike 人机验证</title>
+<style>body{margin:0;padding:6px;background:transparent;font:12px -apple-system,sans-serif;color:#777}#status{margin-top:4px}a{color:#2979ed}</style>
+<div id="captcha"></div><div id="status" role="status">正在载入人机验证…</div>
+<script>
+async function send(token){
+ if(window.webkit?.messageHandlers?.yikeCaptcha){window.webkit.messageHandlers.yikeCaptcha.postMessage(token);return;}
+ const ticket=location.hash.slice(1);
+ if(!token||!ticket)return;
+ try{
+  const response=await fetch('./v2/captcha/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket,captcha_token:token})});
+  const result=await response.json();
+  document.getElementById('status').textContent=response.ok?'验证成功，请返回 Yike 继续。':result.message;
+ }catch{document.getElementById('status').textContent='无法连接验证服务，请重新验证。';}
+}
+function ready(){
+ const sitekey='__SITEKEY__';
+ if(!sitekey){document.getElementById('status').textContent='人机验证暂不可用，请稍后重试。';return;}
+ turnstile.render('#captcha',{sitekey,action:'yike_auth',theme:'auto',size:'flexible',callback:token=>{send(token);document.getElementById('status').textContent='';},'expired-callback':()=>{send('');document.getElementById('status').textContent='验证已过期，请重新验证。';},'error-callback':()=>{send('');document.getElementById('status').textContent='验证加载失败，请检查网络后重试。';}});
+}
+</script><script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=ready&render=explicit" async defer></script></html>

@@ -38,6 +38,8 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     @Published var showVoiceModelDownload = false
     @Published private(set) var detectedVoiceLanguage: String?
     private let localSpeech = LocalSpeechRecognizer()
+    private let partialSpeech = LocalSpeechRecognizer()
+    private var partialVoiceTask: Task<Void, Never>?
     private var voiceRecorder: AVAudioRecorder?
     private var voiceAudioURL: URL?
     private var voiceOperation: Task<Void, Never>?
@@ -1817,11 +1819,16 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 var lastSound = Date()
                 var heardSpeech = false
                 let started = Date()
+                var lastPreview = Date()
                 while !Task.isCancelled, self.voiceSession == id, self.isListening {
                     recorder.updateMeters()
                     let db = recorder.averagePower(forChannel: 0)
                     self.microphoneLevel = VoiceMeter.normalized(decibels: db)
                     if db > -42 { heardSpeech = true; lastSound = Date() }
+                    if heardSpeech && Date().timeIntervalSince(lastPreview) >= 2 && self.partialVoiceTask == nil {
+                        lastPreview = Date()
+                        self.updateLocalPreview(id: id, file: file)
+                    }
                     if !recorder.isRecording || (heardSpeech && Date().timeIntervalSince(lastSound) > 3.5) || (!heardSpeech && Date().timeIntervalSince(started) > 10) {
                         if heardSpeech { self.finishLocalRecording(id: id) }
                         else { self.cancelVoiceInput(); self.setInfo("没有听到清晰语音，请检查麦克风后再试。") }
@@ -1833,6 +1840,29 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         } catch {
             cancelVoiceInput()
             setError("无法启动录音：\(error.localizedDescription) 请检查麦克风连接及权限。")
+        }
+    }
+
+    private func updateLocalPreview(id: UUID, file: URL) {
+        partialVoiceTask = Task { [weak self] in
+            guard let self else { return }
+            let snapshot = file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".wav")
+            defer {
+                try? FileManager.default.removeItem(at: snapshot)
+                if self.voiceSession == id { self.partialVoiceTask = nil }
+            }
+            do {
+                let data = try LiveWaveSnapshot.data(from: Data(contentsOf: file))
+                try data.write(to: snapshot, options: .atomic)
+                let result = try await self.partialSpeech.transcribe(audioURL: snapshot)
+                guard self.voiceSession == id, self.isListening, !Task.isCancelled else { return }
+                self.appendVoiceText(result.text)
+                self.detectedVoiceLanguage = result.language
+                self.voiceInputStatus = "\(languageName(result.language)) · 正在聆听 · 回车完成"
+            } catch {
+                // Short/incomplete speech can be undecidable; keep listening. The
+                // final pass supplies either the full transcript or a useful error.
+            }
         }
     }
 
@@ -1850,6 +1880,9 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
 
     private func finishLocalRecording(id: UUID) {
         guard voiceSession == id, let recorder = voiceRecorder, let file = voiceAudioURL else { return }
+        partialVoiceTask?.cancel()
+        partialVoiceTask = nil
+        partialSpeech.cancel()
         let duration = recorder.currentTime
         recorder.stop()
         voiceRecorder = nil
@@ -1889,6 +1922,9 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
 
     func cancelVoiceInput() {
         voiceSession = nil
+        partialVoiceTask?.cancel()
+        partialVoiceTask = nil
+        partialSpeech.cancel()
         voiceOperation?.cancel()
         voiceOperation = nil
         voiceMeterTask?.cancel()

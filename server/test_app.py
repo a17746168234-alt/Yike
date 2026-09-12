@@ -11,7 +11,9 @@ class TrialTests(unittest.TestCase):
             return {'character_count':0,'character_limit':1000000} if endpoint=='usage' else {'translations':[{'text':'translated '+t} for t in body['text']]}
         self.service=Service(Path(self.temp.name)/'accounts.db','a'*40,key='test-only:fx',enabled=True,upstream=upstream)
         self.response=self.service.auth('register',{'username':'test_user','password':'long-test-password'},'127.0.0.1')
-        self.token=self.response['token']; self.user=self.service.authenticate(self.token)
+        self.token=self.response['token']
+        with self.service.db() as db: db.execute("UPDATE users SET email='test@example.com'")
+        self.user=self.service.authenticate(self.token)
     def tearDown(self): self.temp.cleanup()
     def payload(self,text='你好😀'):
         return {'text':[text],'source':'zh-CN','target':'en','request_id':str(uuid.uuid4())}
@@ -19,10 +21,10 @@ class TrialTests(unittest.TestCase):
         with self.assertRaises(APIError) as error: operation()
         self.assertEqual(error.exception.code,code)
     def test_grant_and_login_never_grants_again(self):
-        self.assertEqual(self.response['account']['remaining'],50000)
+        self.assertEqual(self.response['account']['remaining'],200000)
         self.assertCode('username_exists',lambda:self.service.auth('register',{'username':'TEST_USER','password':'long-test-password'},'127.0.0.2'))
         result=self.service.auth('login',{'username':'TEST_USER','password':'long-test-password'},'127.0.0.3')
-        self.assertEqual(result['account']['granted'],50000)
+        self.assertEqual(result['account']['granted'],200000)
         self.assertCode('invalid_credentials',lambda:self.service.auth('login',{'username':'test_user','password':'wrong-password'},'127.0.0.4'))
         with self.service.db() as db:
             row=db.execute('SELECT * FROM users').fetchone()
@@ -40,15 +42,15 @@ class TrialTests(unittest.TestCase):
         self.assertCode('shared_unavailable',lambda:self.service.translate(self.user,self.payload()))
         self.assertEqual(self.calls,[])
     def test_actual_provider_quota_overrides_configured_pool(self):
-        self.service.upstream=lambda *a: {'character_count':499999,'character_limit':500000}
+        self.service.upstream=lambda *a: {'character_count':13999999,'character_limit':2000000}
         self.assertCode('pool_empty',lambda:self.service.translate(self.user,self.payload()))
         self.assertEqual(self.service.authenticate(self.token)['spent'],0)
     def test_pool_is_total_not_monthly(self):
-        with self.service.db() as db: db.execute("INSERT INTO pool VALUES ('total',999999)")
+        with self.service.db() as db: db.execute("INSERT INTO pool VALUES ('total',3999999)")
         self.assertCode('pool_empty',lambda:self.service.translate(self.user,self.payload()))
         self.assertEqual(self.service.config()['pool_remaining'],1)
     def test_account_quota_is_server_enforced(self):
-        with self.service.db() as db: db.execute('UPDATE users SET spent=49999')
+        with self.service.db() as db: db.execute('UPDATE users SET spent=199999')
         self.assertCode('trial_empty',lambda:self.service.translate(self.user,self.payload()))
         self.assertNotIn('translate',self.calls)
     def test_unknown_failure_refunds_user_and_preserves_pool_reservation(self):
@@ -59,7 +61,7 @@ class TrialTests(unittest.TestCase):
         body=self.payload()
         self.assertCode('upstream_failed',lambda:self.service.translate(self.user,body))
         self.assertEqual(self.service.authenticate(self.token)['spent'],0)
-        self.assertEqual(self.service.config()['pool_remaining'],999997)
+        self.assertEqual(self.service.config()['pool_remaining'],3999997)
         self.assertCode('request_processed',lambda:self.service.translate(self.user,body))
     def test_atomic_account_reservation_under_concurrency(self):
         with self.service.db() as db: db.execute('UPDATE users SET credit=3')

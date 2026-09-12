@@ -1,60 +1,84 @@
-# Yike 公共 DeepL 体验服务
+# Yike 邮箱账号与 DeepL 公共额度服务
 
-Python 3.11+ 标准库服务，适合与现有网站共用的小型服务器；systemd 将内存限制为 192MB、CPU 限制为单核的 30%。仅监听 127.0.0.1:8093，通过现有 Nginx 提供 HTTPS。
+Python 3.11+，标准库。生产实例 `/opt/yike-trial`，仅监听 `127.0.0.1:8093`，Nginx 对外入口为 `https://n5v1b.cn/yike-api/`。内存上限 192MB，CPUQuota 30%；共用服务器上的网站和游戏保持独立。
 
-## 额度与当前状态
+## 当前状态与领取规则
 
-每个账号注册时一次获得 50,000 字符。全站终身总预算 1,000,000 字符，用完停止，不自动按月重置；注册不预留总池预算。实际使用同时受 DeepL 官方返回的剩余额度限制。公共调用目前关闭，可先注册登录；个人客户端密钥不参与公共服务。
+Build 65 使用邮箱、密码、Cloudflare Turnstile 和六位邮箱验证码。只有完成邮箱验证后才创建账号并一次发放 **200,000 字符**。所有账号共用 **4,000,000 字符终身总预算**，按实际使用扣减，不按月重置，注册不预留公共预算。
 
-目前仅适配官方 DeepL API Free（`:fx` 密钥），不调用付费接口。所谓“100 万额度”的密钥仍需核对供应商和套餐；若是 Pro 或第三方中转密钥，不能直接填入本适配器，不能仅凭标称额度认定兼容。
+旧用户名账号可使用现有登录会话绑定邮箱；验证成功后总赠额补齐到 200,000，已有消费保留。旧客户端的用户名注册/登录接口已关闭，避免绕过邮箱验证。未绑定邮箱的旧会话不能使用公共翻译。已退出的旧用户名账号可使用邮箱重新注册；旧账号数据保留但不会获得公共翻译权限。
 
-## 部署与运维
+当前已部署独立的人机验证配置。**SMTP 发信服务和公共 DeepL 密钥由管理员另行配置，尚未完成真实收信与公共翻译验收。** 不读取客户端个人密钥，不复用四级网站的发信服务。
 
-当前实例位于 `/opt/yike-trial`，数据库位于 `/var/lib/yike-trial/accounts.sqlite3`，私密环境文件为 `/etc/yike-trial.env`（权限 600）。不要把这两个数据文件复制到仓库或安装包。备份 SQLite 时使用 SQLite backup API；数据库与 YIKE_SECRET 应作为私密备份一并保管。
+一个验证过的邮箱只能领取一次。验证码10分钟有效、最多尝试5次，登录按IP和邮箱限流、发信同邮箱60秒一次，每IP每小时5次。Gmail 点号和加号别名合并处理；邮箱验证不等于真实身份认证，不能保证一个自然人只拥有一个邮箱。
 
-首次部署：将本目录的 Python 文件、service 和部署脚本复制到服务器 `/opt/yike-trial`，以 root 运行 `bash /opt/yike-trial/deploy.sh`。脚本针对当前 n5v1b.cn 的 Nginx 配置；其他服务器需调整域名、配置文件路径和插入位置。已有部署更新时先备份私密数据，只替换程序，保留环境文件与数据库。
+## 配置（在自己的终端操作，勿将密钥发到聊天或提交仓库）
 
-在管理员自己的交互式终端配置**专用**密钥（输入不回显）：
+### 独立 SMTP 发信服务
+
+准备支持 SSL 的 SMTP 地址、端口、用户名、授权码和已验证的发件邮箱。确认供应商免费额度和付费超额开关后运行：
+
+```bash
+ssh -t dessert-duel-aliyun 'sudo python3 /opt/yike-trial/configure_email.py'
+```
+
+脚本以隐藏输入接收密码，检查 SMTP 登录并设置 Yike 发信限制；默认每天50封、滚动31天1000封，达到上限停止发信。脚本不购买服务、不发送测试邮件；保存后请自行在应用中验证真实收信。该限制仅统计 Yike，供应商若还有其他用途，应预留相应额度。
+
+### 四个公共 DeepL 密钥
 
 ```bash
 ssh -t dessert-duel-aliyun 'sudo python3 /opt/yike-trial/configure_key.py'
 ```
 
-脚本仅请求 `/usage` 验证真实额度，输入 `ENABLE` 后才保存并开启。不会获取客户端个人密钥。不是官方 Free 类型时拒绝保存，不自动切换收费接口。
+输入数量1–4，再逐个隐藏输入专用密钥。脚本仅通过官方 `/usage` 查询每个密钥实际余额，输入 `ENABLE` 后才保存并启动服务。
 
-暂停公共翻译：将服务器 `/etc/yike-trial.env` 中 `YIKE_PUBLIC_ENABLED=0`，再执行 `systemctl restart yike-trial`。注册、登录和已有额度继续保留。检查：
+目前适配 **官方 API Free（`:fx`）**，不调用 Pro 收费接口；官网密钥也须核对具体套餐。标称400万不会覆盖实际供应商限制，若官网合计只有200万，服务按真实剩余量停止。密钥不足以覆盖单次请求时选其他余额充足的密钥；翻译超时或结果不确定时不换密钥重发，避免重复计费。
+
+服务按请求选择余额充足的密钥，每次先核对官方用量；最多同时查询4个余额，翻译串行处理。总池4百万在SQLite中独立持久化，不因轮换密钥或供应商月度重置而重置。
+
+### 暂停、备份和升级
+
+将 `/etc/yike-trial.env` 的 `YIKE_PUBLIC_ENABLED=0` 后运行 `systemctl restart yike-trial`，账号与余额保留。
 
 ```bash
 systemctl status yike-trial --no-pager
 curl --fail https://n5v1b.cn/yike-api/v1/config
 ```
 
-不要删除数据库来更新程序，否则会丢失账号和已使用总额。不要同时启动多个服务进程：上游请求使用单进程全局锁串行处理。
+环境文件权限600；数据库 `/var/lib/yike-trial/accounts.sqlite3` 位于权限700的目录。使用SQLite backup API备份数据库，并私密备份环境文件。不要复制它们到源码或安装包，不要删库升级，不要同时启动多个服务进程。
 
-## 客户端接口（包括 Windows）
+部署需要复制本目录的 `*.py`、`captcha.html`、service 和部署脚本到 `/opt/yike-trial`。`deploy.sh` 为当前 n5v1b.cn 配置设计，其他服务器需调整Nginx文件和插入点。升级先测试再重启，保留环境和数据库；Build65自动添加邮箱列与验证码表，不删除旧账号。
 
-基地址 `https://n5v1b.cn/yike-api/`，JSON 请求/响应；鉴权使用 `Authorization: Bearer <token>`，会话有效 30 天。Windows 可复用接口，并将 token 存入系统凭据管理器；Apple 翻译仅适用于 macOS。
+独立Turnstile组件必须绑定生产域名。服务器环境设置 `TURNSTILE_SITEKEY`、`TURNSTILE_SECRET`，客户端仅加载公开sitekey。必须执行Siteverify并核对 success、hostname=`n5v1b.cn`、action=`yike_auth`；不可使用测试密钥上线或仅靠客户端打勾。验证码组件经HTTPS加载到原生WKWebView。若内嵌组件卡住，可使用“在浏览器验证”；服务器签发随机5分钟票据，浏览器经Siteverify验证后回传，票据单次使用。浏览器验证在实机完成了真实服务器校验；内嵌组件是否成功受WebView与网络环境影响。
 
-| 方法与路径 | 请求/说明 |
+## Windows / 其他客户端接口
+
+基地址如上，JSON请求；会话使用 `Authorization: Bearer <token>`，有效30天，放入系统凭据管理器。所有错误返回 `code` 和 `message`。Windows可复用服务接口，但需自行实现浏览器验证码组件；Apple引擎不支持Windows。
+
+| 方法与路径 | 请求与结果 |
 | --- | --- |
-| GET v1/config | 无需登录，返回赠送额度、公共池余额和 enabled |
-| POST v1/register | username、password；返回 token、account、message |
-| POST v1/login | username、password；不会重复赠送 |
-| GET v1/me | 返回当前 account |
-| POST v1/logout | 撤销当前 token |
+| GET v1/config | enabled、gift、pool_limit、pool_remaining |
+| GET captcha | 真正的Turnstile组件；使用HTTPS页面获取token |
+| POST v2/login | email、password、captcha_token；返回token/account/message |
+| POST v2/register/send | email、password、captcha_token；返回challenge_id/message，无账号或赠额 |
+| POST v2/register/verify | email、challenge_id、code；验证后返回token/account/message |
+| POST v2/reset/send | email、captcha_token；返回challenge_id/message |
+| POST v2/reset/verify | email、challenge_id、code、new_password；撤销会话，重新登录 |
+| POST v2/bind/send | 旧会话 + email、captcha_token |
+| POST v2/bind/verify | 旧会话 + email、challenge_id、code；补齐总赠額，替换会话 |
+| GET v1/me | account包含email、username、granted、used、remaining |
+| POST v1/logout | 撤销当前会话 |
 | POST v1/password | old_password、new_password；撤销全部会话 |
-| POST v1/translate | text 字符串数组、source、target、request_id UUID |
+| POST v1/translate | text字符串数组、source、target、request_id UUID |
 
-账号名为 4–24 位英文、数字或下划线，大小写不敏感；密码 10–128 字符。目前没有邮箱找回，不承诺一人只能注册一个账号。IP 注册限额为每天 3 次，登录按 IP/账号限流，翻译每账号每分钟 5 次。共享网络用户也可能触发 IP 限制。
+翻译仅支持 `en`、`zh-CN`、`ja`、`ko` 且源目标不同，自动语言检测由客户端完成。单次最多40段、5000 Unicode字符，每账号每分钟5次。网络结果不确定时同内容使用同request_id重试。成功结果缓存10分钟，过期后同ID不重复扣费；上游失败退回个人体验额度，不确定是否已被上游计费时保守保留总池预算占用。
 
-source/target 为 `en`、`zh-CN`、`ja`、`ko`，且必须不同。自动检测由客户端完成。单次最多 40 段、5,000 Unicode 字符。网络结果不确定时必须用相同 request_id 和相同内容重试；服务端缓存成功译文 10 分钟，过期后同 ID 不再返回译文，也不重复扣额。错误返回 code 和 message，客户端应显示解决提示。
+不保存原文；译文短时缓存，过期后定期清理；密码存scrypt摘要，会话/验证码存HMAC摘要。验证码、密码、会话和邮件授权码不进入日志。
 
-密码使用带独立盐的 scrypt 摘要，会话只存 HMAC 摘要。服务不保存原文；译文缓存有效期 10 分钟，过期后定期清理。上游失败退回账号额度；无法确定上游是否计费时保留公共池预算占用，防止超支。
-
-## 验证
+## 测试
 
 ```bash
 python3 -m unittest discover -s server -p 'test_*.py' -v
 ```
 
-测试使用临时数据库与模拟 DeepL，不消耗实际 DeepL 字符。真实共享翻译需专用密钥启用后另行验收；部署与模拟测试通过不代表未知密钥已经兼容。
+测试使用临时数据库和模拟邮件/上游，覆盖邮箱发放条件、重复/并发验证、过期/尝试上限、Turnstile校验、密码找回撤销会话、旧账号补齐、四密钥选择和不确定失败禁止换key重发。生产真实收信、真人交互和DeepL成功翻译须在管理员完成配置后另行验收。

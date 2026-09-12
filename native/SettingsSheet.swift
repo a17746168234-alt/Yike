@@ -33,7 +33,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .appearance: return "让 Yike 符合你的使用习惯"
-        case .account: return "管理账号、登录安全与公共体验额度"
+        case .account: return "登录与管理你的 Yike 账号"
         case .deepl: return "从申请账号到填写密钥，一步步完成"
         case .speech: return "调整声音、语速与本地缓存"
         case .shortcuts: return "自定义快捷键，随时呼出翻译悬浮窗"
@@ -196,9 +196,8 @@ struct SettingsSheet: View {
             ))
         }
         case .account:
-        settingsCard("账号与安全", icon: "person.crop.circle") {
-            TrialAccountSettings(model: model)
-        }
+        TrialAccountSettings(model: model)
+            .modifier(AccountFormScale())
         case .deepl:
         if let feedback = model.deepLKeyFeedback { KeySaveFeedbackView(notice: feedback) }
         settingsCard("DeepL 密钥与帮助", icon: "key") {
