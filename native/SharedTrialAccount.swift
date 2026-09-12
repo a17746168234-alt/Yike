@@ -1,6 +1,5 @@
 import SwiftUI
 import Foundation
-import WebKit
 
 struct TrialAccount: Codable {
     let username: String
@@ -128,7 +127,8 @@ final class SharedTrialAccount: ObservableObject {
         } catch { feedback = error.localizedDescription; feedbackIsError = true; return false }
     }
 
-    func browserVerification() async throws -> String {
+    func browserVerification() async throws -> (token: String, expiresAt: Date) {
+        let expiresAt = Date().addingTimeInterval(295)
         struct Start: Decodable { let ticket: String }
         struct Status: Decodable { let verified: Bool }
         let start: Start = try await request("v2/captcha/start", method: "POST", body: [:], authenticated: false)
@@ -138,7 +138,8 @@ final class SharedTrialAccount: ObservableObject {
         for _ in 0..<100 {
             try await Task.sleep(for: .seconds(3))
             let status: Status = try await request("v2/captcha/status", method: "POST", body: ["ticket":start.ticket], authenticated: false)
-            if status.verified { return "browser:" + start.ticket }
+            try Task.checkCancellation()
+            if status.verified { return ("browser:" + start.ticket, expiresAt) }
         }
         throw TrialServiceError(code: "captcha", message: "验证已过期，请重新打开。")
     }
@@ -193,44 +194,6 @@ final class SharedTrialAccount: ObservableObject {
     }
 }
 
-struct TrialCaptchaView: NSViewRepresentable {
-    let url: URL
-    @Binding var token: String
-    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
-    func makeNSView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .nonPersistent()
-        config.userContentController.add(context.coordinator, name: "yikeCaptcha")
-        let web = WKWebView(frame: .zero, configuration: config)
-        web.navigationDelegate = context.coordinator
-        web.setValue(false, forKey: "drawsBackground")
-        web.load(URLRequest(url: url)); return web
-    }
-    func updateNSView(_ view: WKWebView, context: Context) { context.coordinator.parent = self }
-    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
-        view.stopLoading(); view.configuration.userContentController.removeScriptMessageHandler(forName: "yikeCaptcha")
-    }
-    class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-        var parent: TrialCaptchaView
-        init(parent: TrialCaptchaView) { self.parent = parent }
-        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.frameInfo.isMainFrame,
-                  message.frameInfo.securityOrigin.host == parent.url.host,
-                  message.frameInfo.securityOrigin.protocol == "https",
-                  let value = message.body as? String, value.count <= 2048 else { return }
-            parent.token = value
-        }
-        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            guard let url = action.request.url else { decisionHandler(.cancel); return }
-            if action.targetFrame?.isMainFrame == false && (url.absoluteString == "about:blank" || url.absoluteString.hasPrefix("blob:https://challenges.cloudflare.com/")) {
-                decisionHandler(.allow); return
-            }
-            guard url.scheme == "https", url.host == parent.url.host || url.host == "challenges.cloudflare.com" else { decisionHandler(.cancel); return }
-            decisionHandler(.allow)
-        }
-    }
-}
-
 struct TrialAccountSettings: View {
     @ObservedObject private var account = SharedTrialAccount.shared
     @ObservedObject var model: TranslatorViewModel
@@ -242,6 +205,8 @@ struct TrialAccountSettings: View {
     @State private var challenge = ""
     @State private var captcha = ""
     @State private var captchaID = UUID()
+    @State private var captchaExpiresAt = Date.distantPast
+    @State private var captchaHelp = false
     @State private var resendAfter = Date.distantPast
     @State private var privacy = false
     @State private var browserTask: Task<Void, Never>?
@@ -250,7 +215,33 @@ struct TrialAccountSettings: View {
     private var purpose: String { bindingEmail ? "bind" : (mode == "forgot" ? "reset" : "register") }
     private var verified: Bool { account.account?.email != nil }
     private var validEmail: Bool { email.contains("@") && email.contains(".") }
-    private func resetCaptcha() { browserTask?.cancel(); captcha = ""; captchaID = UUID() }
+    private func resetCaptcha() {
+        browserTask?.cancel(); browserTask = nil; browserWaiting = false
+        captcha = ""; captchaExpiresAt = .distantPast; captchaID = UUID()
+    }
+    private func startBrowserVerification() {
+        resetCaptcha()
+        let attempt = captchaID
+        browserWaiting = true
+        account.feedback = ""; account.feedbackIsError = false
+        browserTask = Task {
+            do {
+                let result = try await account.browserVerification()
+                try Task.checkCancellation()
+                guard captchaID == attempt else { return }
+                guard result.expiresAt > Date() else {
+                    throw TrialServiceError(code: "captcha", message: "验证链接已过期，请重新开始验证。")
+                }
+                captchaExpiresAt = result.expiresAt; captcha = result.token
+                account.feedback = ""; account.feedbackIsError = false
+            } catch is CancellationError { }
+            catch {
+                guard captchaID == attempt else { return }
+                account.feedback = error.localizedDescription; account.feedbackIsError = true
+            }
+            if captchaID == attempt { browserWaiting = false }
+        }
+    }
     private func changeMode(_ value: String) {
         mode = value; challenge = ""; code = ""; password = ""; confirmation = ""
         account.feedback = ""; resetCaptcha()
@@ -325,34 +316,32 @@ struct TrialAccountSettings: View {
                                 .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Color(red: 0.86, green: 0.31, blue: 0.34))
                         }
                     }
-                    if let url = account.baseURL?.appendingPathComponent("captcha") {
-                        VStack(spacing: 7) {
-                        if captcha.hasPrefix("browser:") {
-                            Label("人机验证通过", systemImage: "checkmark.circle.fill")
-                                .font(.system(size: 14, weight: .medium)).foregroundStyle(.green)
-                                .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-                        } else {
-                            TrialCaptchaView(url: url, token: Binding(get: { captcha }, set: { if !captcha.hasPrefix("browser:") { captcha = $0 } })).id(captchaID).frame(height: 76)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            Image(systemName: captcha.isEmpty ? "checkmark.shield" : "checkmark.circle.fill")
+                                .foregroundStyle(captcha.isEmpty ? Color.accentColor : Color.green)
+                            Text(captcha.isEmpty ? "人机验证" : "人机验证通过")
+                                .font(.system(size: 14, weight: .medium))
+                            Spacer()
+                            if browserWaiting { ProgressView().controlSize(.small) }
+                        }
+                        if captcha.isEmpty {
+                            Text(browserWaiting ? "请在浏览器完成验证，成功后会自动同步到这里。" : "在浏览器中安全验证，完成后返回 Yike。")
+                                .font(.system(size: 12)).foregroundStyle(.secondary)
                         }
                         HStack {
+                            if browserWaiting {
+                                Button("取消等待") { resetCaptcha() }
+                            } else {
+                                Button(captcha.isEmpty ? "开始验证" : "重新验证") { startBrowserVerification() }
+                            }
                             Spacer()
-                            Button(browserWaiting ? "等待浏览器验证…" : "在浏览器验证") {
-                                browserTask?.cancel()
-                                browserWaiting = true
-                                account.feedback = ""
-                                browserTask = Task {
-                                    defer { browserWaiting = false }
-                                    do { captcha = try await account.browserVerification(); account.feedback = ""; account.feedbackIsError = false }
-                                    catch is CancellationError { }
-                                    catch { account.feedback = error.localizedDescription; account.feedbackIsError = true }
-                                }
-                            }.buttonStyle(.plain).disabled(browserWaiting)
-                            Button("重新验证") { browserTask?.cancel(); resetCaptcha() }.buttonStyle(.plain)
-                        }.font(.system(size: 11)).foregroundStyle(.secondary)
-                        }.padding(12)
-                            .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.07), lineWidth: 1))
-                    }
+                            Button("故障排除") { captchaHelp = true }
+                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                        }.font(.system(size: 12))
+                    }.padding(16)
+                        .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.07), lineWidth: 1))
                     Button(mode == "login" && !bindingEmail ? "登录" : "发送邮箱验证码") {
                         Task {
                             if mode == "login" && !bindingEmail { await account.signIn(email: email, password: password, captcha: captcha) }
@@ -387,7 +376,19 @@ struct TrialAccountSettings: View {
         .textFieldStyle(.roundedBorder).controlSize(.large)
         .buttonStyle(.bordered).disabled(account.busy)
         .task { await account.refresh() }
-        .onDisappear { browserTask?.cancel() }
+        .onDisappear { resetCaptcha() }
+        .task(id: captcha) {
+            guard !captcha.isEmpty else { return }
+            let current = captcha
+            do { try await Task.sleep(for: .seconds(max(0, captchaExpiresAt.timeIntervalSinceNow))) }
+            catch { return }
+            guard captcha == current else { return }
+            resetCaptcha()
+            account.feedback = "人机验证已过期，请重新开始验证。"; account.feedbackIsError = true
+        }
+        .sheet(isPresented: $captchaHelp) {
+            CaptchaTroubleshootingSheet()
+        }
         .popover(isPresented: $privacy) {
             Text("邮箱仅用于账号验证与安全通知。DeepL 高质量翻译将文字经 Yike 服务器发送至 DeepL；服务器保存账号和额度记录，译文短时缓存用于防止重复扣额。赠送额度仅领取一次，受服务可用余额限制。人机验证由 Cloudflare 提供。")
                 .font(.system(size: 12)).padding(20).frame(width: 320)

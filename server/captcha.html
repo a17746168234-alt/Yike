@@ -1,20 +1,70 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yike 人机验证</title>
-<style>body{margin:0;padding:6px;background:transparent;font:12px -apple-system,sans-serif;color:#777}#status{margin-top:4px}a{color:#2979ed}</style>
-<div id="captcha"></div><div id="status" role="status">正在载入人机验证…</div>
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Yike 人机验证</title>
+<style>
+:root{color-scheme:light dark;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#283345;background:#f2f5fa}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px}main{width:min(100%,460px);padding:32px;border:1px solid #dce3ef;border-radius:20px;background:#fff;box-shadow:0 16px 48px #253b6510}h1{font-size:23px;margin:0 0 12px}p{line-height:1.7;color:#657085}#captcha{margin:24px 0 16px;min-height:65px}#status{min-height:50px;margin:0 0 20px}#status[data-kind=success]{color:#207a4b}#status[data-kind=error]{color:#b34535}.actions{display:flex;gap:16px;align-items:center}button{font:inherit;cursor:pointer;border:0;border-radius:9px;padding:10px 16px;background:#4568c9;color:white}button:disabled{opacity:.5;cursor:default}.secondary{color:#576784;background:#eef2f8}dialog{max-width:540px;width:calc(100% - 32px);padding:28px;border:1px solid #dce3ef;border-radius:18px;color:inherit;background:#fff}dialog::backdrop{background:#15203555}dialog h2{font-size:20px;margin-top:0}li{line-height:1.7;margin:12px 0}small{display:block;line-height:1.6;color:#758094;margin-top:24px}.embedded body{display:block;padding:6px;min-height:0;background:transparent;font-size:12px}.embedded main{border:0;border-radius:0;padding:0;box-shadow:none;background:transparent;width:100%}.embedded h1,.embedded .intro,.embedded .actions,.embedded small{display:none}.embedded #captcha{margin:0;min-height:0}.embedded #status{min-height:0;margin:4px 0 0}
+@media(prefers-color-scheme:dark){:root{background:#171c26;color:#e6ebf5}main,dialog{background:#222936;border-color:#354052}p,small{color:#b1bdd1}.secondary{background:#333e52;color:#d4dff4}#status[data-kind=success]{color:#79d8a5}#status[data-kind=error]{color:#f2a393}}
+@media(max-width:380px){body{padding:12px}main{padding:20px}}
+</style>
+<script>if(window.webkit?.messageHandlers?.yikeCaptcha)document.documentElement.classList.add('embedded');</script>
+<main>
+<h1>Yike 人机验证</h1>
+<p class="intro">完成验证后返回 Yike，应用会自动同步结果。</p>
+<div id="captcha"></div>
+<p id="status" role="status" aria-live="polite">正在载入安全验证…</p>
+<div class="actions"><button id="retry" type="button">重新验证</button><button id="help" class="secondary" type="button">故障排除</button></div>
+<small>验证链接约 5 分钟有效，仅用于本次登录或注册。请勿分享本页地址。</small>
+</main>
+<dialog id="troubleshooting" aria-labelledby="help-title">
+<h2 id="help-title">人机验证故障排除</h2>
+<p>验证未完成不代表密码或邮箱有问题。</p>
+<ol><li>使用最新版 Safari、Chrome 或 Edge。检查网页拦截扩展是否阻止验证加载。</li><li>保持网络稳定，验证时不要切换代理或网络。网络恢复后点击“重新验证”。</li><li>若提示链接过期，请返回 Yike 取消等待，再点击“开始验证”。</li><li>本页显示成功后返回应用；如未同步，可重新开始验证。</li></ol>
+<button id="close-help" type="button">关闭</button>
+</dialog>
 <script>
+const statusNode=document.getElementById('status');
+const retryButton=document.getElementById('retry');
+const ticket=location.hash.slice(1);
+const bridge=window.webkit?.messageHandlers?.yikeCaptcha;
+let widgetID, phase='loading', pendingTimer, attempt=0;
+function status(message,kind='pending'){statusNode.textContent=message;statusNode.dataset.kind=kind;}
+function watchdog(){clearTimeout(pendingTimer);pendingTimer=setTimeout(()=>{if(phase==='loading'||phase==='verifying')status('验证耗时较长。请检查网络，或打开故障排除后重试。','error');},25000);}
+function fail(message){if(phase==='success')return;phase='error';clearTimeout(pendingTimer);retryButton.disabled=false;if(bridge)bridge.postMessage('');status(message,'error');}
 async function send(token){
- if(window.webkit?.messageHandlers?.yikeCaptcha){window.webkit.messageHandlers.yikeCaptcha.postMessage(token);return;}
- const ticket=location.hash.slice(1);
- if(!token||!ticket)return;
+ if(phase==='success'||phase==='submitting')return;
+ clearTimeout(pendingTimer);phase='submitting';retryButton.disabled=true;
+ const current=attempt;
+ if(bridge){bridge.postMessage(token);phase='success';status('验证已完成，请继续。','success');return;}
+ status('正在确认验证结果…');
+ const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),15000);
  try{
-  const response=await fetch('./v2/captcha/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket,captcha_token:token})});
+  const response=await fetch('./v2/captcha/complete',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket,captcha_token:token})});
   const result=await response.json();
-  document.getElementById('status').textContent=response.ok?'验证成功，请返回 Yike 继续。':result.message;
- }catch{document.getElementById('status').textContent='无法连接验证服务，请重新验证。';}
+  if(current!==attempt)return;
+  if(!response.ok){fail(result.message||'无法确认验证结果，请重试。');return;}
+  phase='success';status('验证成功，请返回 Yike 继续。','success');
+ }catch{if(current===attempt)fail('无法连接验证服务。请检查网络后重试；若 Yike 已显示验证通过，可直接继续。');}
+ finally{clearTimeout(timer);}
 }
 function ready(){
  const sitekey='__SITEKEY__';
- if(!sitekey){document.getElementById('status').textContent='人机验证暂不可用，请稍后重试。';return;}
- turnstile.render('#captcha',{sitekey,action:'yike_auth',theme:'auto',size:'flexible',callback:token=>{send(token);document.getElementById('status').textContent='';},'expired-callback':()=>{send('');document.getElementById('status').textContent='验证已过期，请重新验证。';},'error-callback':()=>{send('');document.getElementById('status').textContent='验证加载失败，请检查网络后重试。';}});
+ if(!bridge&&!/^[A-Za-z0-9_-]{43}$/.test(ticket)){fail('请从 Yike 的“开始验证”按钮打开此页面。');retryButton.disabled=true;return;}
+ if(!sitekey){fail('人机验证暂不可用，请稍后重试。');return;}
+ phase='verifying';watchdog();
+ try{widgetID=turnstile.render('#captcha',{sitekey,action:'yike_auth',theme:'auto',size:'flexible',retry:'never','refresh-expired':'manual','refresh-timeout':'manual','feedback-enabled':false,
+ callback:send,
+ 'expired-callback':()=>{if(phase!=='success')fail('验证已过期，请返回 Yike 重新开始。');},
+ 'timeout-callback':()=>fail('验证超时，请检查网络后重新验证。'),
+ 'error-callback':code=>fail('验证加载失败（'+String(code).slice(0,32)+'）。请打开故障排除或重试。')});}
+ catch{fail('浏览器未能加载验证，请更新浏览器或稍后重试。');}
 }
-</script><script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=ready&render=explicit" async defer></script></html>
+retryButton.onclick=()=>{if(phase==='success'||phase==='submitting')return;attempt++;if(widgetID===undefined){location.reload();return;}phase='verifying';status('正在重新验证…');watchdog();turnstile.reset(widgetID);};
+document.getElementById('help').onclick=()=>document.getElementById('troubleshooting').showModal();
+document.getElementById('close-help').onclick=()=>document.getElementById('troubleshooting').close();
+watchdog();
+</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=ready&render=explicit" onerror="fail('无法加载安全验证，请检查网络或网页拦截扩展后重试。')" async defer></script>
+</html>
