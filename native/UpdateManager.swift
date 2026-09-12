@@ -38,10 +38,12 @@ final class UpdateManager: ObservableObject {
     func checkIfNeeded() async {
         let last = UserDefaults.standard.double(forKey: lastCheckKey)
         guard Date().timeIntervalSince1970 - last >= interval else { return }
-        await check(force: false)
+        _ = await check(force: false)
     }
 
-    func checkNow() async { await check(force: true) }
+    enum CheckResult { case current, available, failed }
+
+    func checkNow() async -> CheckResult? { await check(force: true) }
 
     func installNow() async {
         guard let update = latest, !isChecking else { return }
@@ -77,8 +79,8 @@ final class UpdateManager: ObservableObject {
         }
     }
 
-    private func check(force: Bool) async {
-        guard !isChecking else { return }
+    private func check(force: Bool) async -> CheckResult? {
+        guard !isChecking else { return nil }
         isChecking = true
         status = force ? "正在检查更新…" : ""
         defer { isChecking = false }
@@ -86,7 +88,7 @@ final class UpdateManager: ObservableObject {
         guard let base = Bundle.main.object(forInfoDictionaryKey: "YikeTrialAPIBaseURL") as? String,
               let url = URL(string: base)?.appendingPathComponent("v1/update/macos") else {
             if force { status = "更新服务地址无效。" }
-            return
+            return .failed
         }
 
         var request = URLRequest(url: url)
@@ -102,12 +104,15 @@ final class UpdateManager: ObservableObject {
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastCheckKey)
             if update.build > currentBuild {
                 status = "发现新版本 \(update.version)（Build \(update.build)）"
-                showsUpdateAlert = true
+                if !force { showsUpdateAlert = true }
+                return .available
             } else {
                 status = "当前已是最新版。"
+                return .current
             }
         } catch {
             if force { status = "暂时无法检查更新，请确认网络后重试。" }
+            return .failed
         }
     }
 

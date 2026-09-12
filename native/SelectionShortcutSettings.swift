@@ -11,7 +11,7 @@ struct SelectionShortcutSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Label("划词翻译快捷键", systemImage: "keyboard")
+                Label("选中文字后唤起", systemImage: "keyboard")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Text(current.label).font(.system(size: 16, weight: .medium, design: .monospaced))

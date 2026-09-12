@@ -162,7 +162,7 @@ struct TranslatorView: View {
             let processID = (notification.userInfo?["pid"] as? Int).map(pid_t.init)
             model.translateSelectedText(from: processID)
         }
-        .alert("发现 Yike 新版本", isPresented: $updater.showsUpdateAlert) {
+        .alert("检查到新版本", isPresented: $updater.showsUpdateAlert) {
             Button("暂不更新") { }
             Button("立即更新") { Task { await updater.installNow() } }
         } message: {

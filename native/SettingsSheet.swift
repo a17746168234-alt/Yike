@@ -8,7 +8,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .appearance: return "外观"
         case .account: return "账号与安全"
-        case .deepl: return "DeepL 密钥与帮助"
+        case .deepl: return "了解与帮助"
         case .speech: return "在线朗读"
         case .shortcuts: return "快捷键与划词"
         case .history: return "历史记录"
@@ -21,7 +21,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .appearance: return "paintpalette"
         case .account: return "person.crop.circle.badge.checkmark"
-        case .deepl: return "key.horizontal"
+        case .deepl: return "book"
         case .speech: return "waveform"
         case .shortcuts: return "keyboard"
         case .history: return "clock.arrow.circlepath"
@@ -34,13 +34,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .appearance: return "让 Yike 符合你的使用习惯"
         case .account: return "登录与管理你的 Yike 账号"
-        case .deepl: return "从申请账号到填写密钥，一步步完成"
+        case .deepl: return "了解翻译引擎、信息处理方式与个人接入"
         case .speech: return "调整声音、语速与本地缓存"
         case .shortcuts: return "自定义快捷键，随时呼出翻译悬浮窗"
         case .history: return "管理文字与图片的本机记录"
         case .permissions: return "检查语音识别和麦克风的访问权限"
         case .glossary: return "让人名、术语与常用表达保持一致"
-        case .about: return "认识 Yike，了解本次更新"
+        case .about: return "查看版本、检查更新与联系我们"
         }
     }
 }
@@ -55,6 +55,9 @@ struct SettingsSheet: View {
     @State private var selectedSection: SettingsSection = .appearance
     @State private var glossarySource = ""
     @State private var showDeepLSettings = false
+    @State private var showHistory = false
+    @State private var updateCheckResult: UpdateManager.CheckResult?
+    @State private var showUpdateResult = false
     @State private var keyButtonHighlighted = false
     @State private var appleButtonHighlighted = false
     @State private var glossaryTarget = ""
@@ -62,9 +65,8 @@ struct SettingsSheet: View {
     @State private var glossaryTargetLanguage = "zh-CN"
 
     private var versionText: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.5"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
-        return "V\(version)（Build \(build)）"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0"
+        return "V \(version)"
     }
 
     var body: some View {
@@ -150,6 +152,28 @@ struct SettingsSheet: View {
         .sheet(isPresented: $showDeepLSettings) {
             DeepLSettingsSheet(model: model, isPresented: $showDeepLSettings)
         }
+        .sheet(isPresented: $showHistory) {
+            HistorySheet(model: model, isPresented: $showHistory)
+        }
+        .alert(updateAlertTitle, isPresented: $showUpdateResult) {
+            if updateCheckResult == .available {
+                Button("暂不更新", role: .cancel) { }
+                Button("立即更新") { Task { await updater.installNow() } }
+            } else {
+                Button("知道了", role: .cancel) { }
+            }
+        } message: {
+            if updateCheckResult == .available, let update = updater.latest {
+                Text("V \(update.version)\n\n\(update.notes)")
+            } else if updateCheckResult == .failed {
+                Text(updater.status)
+            }
+        }
+        .alert("更新没有完成", isPresented: $updater.showsInstallError) {
+            Button("知道了", role: .cancel) { }
+        } message: {
+            Text(updater.status)
+        }
         .task(id: keyButtonHighlighted) {
             guard keyButtonHighlighted else { return }
             do { try await Task.sleep(nanoseconds: 2_000_000_000) }
@@ -185,8 +209,15 @@ struct SettingsSheet: View {
             }
         }
         case .history:
-        settingsCard("本机历史记录", icon: "clock.arrow.circlepath") {
+        settingsCard("保存与回看", icon: "clock.arrow.circlepath") {
             Text("按需保留翻译记录，方便之后查看与复用。").font(.system(size: 12)).foregroundStyle(.secondary)
+            Button {
+                showHistory = true
+            } label: {
+                Label("查看历史记录", systemImage: "clock.arrow.circlepath")
+            }
+            .accessibilityIdentifier("settings.openHistory")
+            Divider()
             Toggle("保存翻译历史", isOn: Binding(
                 get: { model.historyRecordingEnabled },
                 set: { model.setHistoryRecording($0) }
@@ -200,7 +231,17 @@ struct SettingsSheet: View {
         AccountSecuritySummary(model: model)
         case .deepl:
         if let feedback = model.deepLKeyFeedback { KeySaveFeedbackView(notice: feedback) }
-        settingsCard("DeepL 密钥与帮助", icon: "key") {
+        settingsCard("三种引擎如何工作", icon: "arrow.triangle.branch") {
+            engineExplanation("Apple 系统翻译", detail: "调用 macOS 15 及以上的系统翻译能力。首次使用需下载对应语言包，准备完成后在本机处理文字，无需 DeepL 密钥。")
+            Divider()
+            engineExplanation("DeepL（个人接入）", detail: "使用你自己的 API Free 密钥，将待翻译文字直接发送到 DeepL 在线翻译，消耗个人账号额度。密钥保存在本机系统钥匙串中。")
+            Divider()
+            engineExplanation("DeepL 高质量翻译", detail: "登录 Yike 账号后使用，无需填写个人密钥。待翻译文字通过 Yike 服务转交 DeepL 处理，使用账号可用额度，需要联网。")
+            Text("图片先在本机识别文字，再交给所选引擎翻译；翻译记录是否保留，可在“历史记录”中设置。")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        settingsCard("个人 DeepL 接入", icon: "key") {
             if let usage = model.deepLUsage {
                 LabeledContent("DeepL 免费额度") {
                     Text("剩余 \(max(0, usage.characterLimit - usage.characterCount)) / \(usage.characterLimit) 字符")
@@ -224,7 +265,7 @@ struct SettingsSheet: View {
             }
         }
         case .speech:
-        settingsCard("在线朗读", icon: "speaker.wave.2") {
+        settingsCard("声音与缓存", icon: "speaker.wave.2") {
             HStack {
                 Text("语速")
                 Slider(value: Binding(
@@ -250,7 +291,7 @@ struct SettingsSheet: View {
             }
         }
         case .permissions:
-        settingsCard("权限状态", icon: "lock.shield") {
+        settingsCard("语音输入授权", icon: "lock.shield") {
             permissionRow("语音识别", status: model.speechRecognitionPermissionText) {
                 NoticeAction.openSpeechRecognitionSettings.open()
             }
@@ -261,7 +302,7 @@ struct SettingsSheet: View {
         case .shortcuts:
             SelectionShortcutSettings(model: model)
         case .glossary:
-        settingsCard("自定义词库", icon: "text.book.closed") {
+        settingsCard("固定译文", icon: "text.book.closed") {
             HStack(spacing: 10) {
                 TextField("原词，例如 OpenAI", text: $glossarySource)
                 Image(systemName: "arrow.right")
@@ -317,28 +358,30 @@ struct SettingsSheet: View {
             }
         }
         case .about:
-        settingsCard("关于与更新", icon: "info.circle") {
+        settingsCard("版本信息", icon: "arrow.triangle.2.circlepath") {
             LabeledContent("当前版本") { Text(versionText) }
-            LabeledContent("开发者") { Text("本工具由null团队打造") }
-            Text("Yike 每天启动时自动检查一次更新，也可以在这里立即检查。")
-                .font(.system(size: 12))
-                .foregroundStyle(Color.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if !updater.status.isEmpty {
-                Text(updater.status)
-                    .font(.system(size: 12, weight: updater.hasUpdate ? .medium : .regular))
-                    .foregroundStyle(updater.hasUpdate ? Color.accentColor : Color.secondary)
-            }
+            Text("本工具由null团队打造")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
             HStack {
                 Button(updater.isChecking ? "正在检查…" : "检查更新") {
-                    Task { await updater.checkNow() }
+                    Task {
+                        if let result = await updater.checkNow() {
+                            updateCheckResult = result
+                            showUpdateResult = true
+                        }
+                    }
                 }
                 .disabled(updater.isChecking)
-                if updater.hasUpdate {
-                    Button("立即更新") { Task { await updater.installNow() } }
-                        .buttonStyle(.borderedProminent)
-                }
+
             }
+        }
+        settingsCard("联系 Yike", icon: "envelope") {
+            HStack(spacing: 12) {
+                Text("邮箱").foregroundStyle(.secondary)
+                Text("yike141@qq.com")
+                    .textSelection(.enabled)
+            }
+            .font(.system(size: 12))
         }
         settingsCard("退出应用", icon: "power") {
             HStack {
@@ -358,15 +401,34 @@ struct SettingsSheet: View {
         }
     }
 
+    private var updateAlertTitle: String {
+        switch updateCheckResult {
+        case .current: return "当前为最新版"
+        case .available: return "检查到新版本"
+        case .failed: return "检查更新失败"
+        case nil: return "检查更新"
+        }
+    }
+
     private func settingsCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: icon)
-                .font(.system(size: 15, weight: .semibold))
+            if !title.isEmpty {
+                Label(title, systemImage: icon)
+                    .font(.system(size: 15, weight: .semibold))
+            }
             content()
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassSurface(cornerRadius: 14)
+    }
+
+    private func engineExplanation(_ title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 12, weight: .semibold))
+            Text(detail).font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func permissionRow(_ title: String, status: String, action: @escaping () -> Void) -> some View {
