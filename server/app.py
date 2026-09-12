@@ -15,7 +15,7 @@ class Service:
         self.enabled, self.gift, self.pool_limit = enabled, gift, pool_limit
         self.update_path = Path(update_path)
         self.upstream = upstream or self.deepl
-        self.translation_lock = threading.Lock()
+        self.translation_lock = threading.BoundedSemaphore(2)
         self.auth_slots = threading.BoundedSemaphore(2)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with self.db() as db:
@@ -156,6 +156,9 @@ class Service:
                     raise APIError(503,'usage_unavailable','共享池额度信息异常，已暂停请求。')
                 if usage['character_count']+cost>min(self.pool_limit,usage['character_limit']): raise APIError(429,'pool_empty','公共字符池本期已用完，请使用 Apple 翻译或自己的密钥。')
                 db.execute('BEGIN IMMEDIATE')
+                # Recheck after quota I/O so concurrent replays cannot reserve twice.
+                if db.execute('SELECT 1 FROM requests WHERE user_id=? AND request_id=?',(user['id'],request_id)).fetchone():
+                    db.rollback(); raise APIError(409,'request_processed','该请求正在处理或已处理，未重复扣额。')
                 current=db.execute('SELECT * FROM users WHERE id=?',(user['id'],)).fetchone()
                 if not current or current['credit']-current['spent']<cost:
                     db.rollback(); raise APIError(402,'trial_empty','你的体验额度不足，请缩短文字，或使用 Apple 翻译 / 自己的密钥。')
