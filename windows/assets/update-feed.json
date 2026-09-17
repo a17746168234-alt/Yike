@@ -1,5 +1,5 @@
 {
   "Version": "1.2.0.0",
-  "DownloadUrl": "https://example.com/yike/releases",
-  "Notes": "发布前请将示例地址替换为本项目的 Releases 地址。"
+  "DownloadUrl": "https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.0",
+  "Notes": "Yike Windows 1.2.0，完整安装包包含语音运行库。"
 }
