@@ -47,23 +47,31 @@ private async Task CheckForUpdatesAsync (System.Windows.Controls.Button button, 
 	button.IsEnabled = false;
 	button.Content = "正在检查…";
 	statusText.Text = "正在连接更新服务…";
+	Window owner = settingsWindow;
+	CancellationTokenSource cancellation = new CancellationTokenSource ();
+	updateCheckCancel = cancellation;
 	try {
-		UpdateCheckResult result = await new UpdateService ().CheckAsync (CancellationToken.None);
+		UpdateCheckResult result = await new UpdateService ().CheckAsync (cancellation.Token);
+		if (cancellation.IsCancellationRequested || exiting || (owner != null && !owner.IsVisible)) return;
 		if (!result.Success) {
 			statusText.Text = result.Message;
-			ShowUpdateDialog ("无法检查更新", result.Message, null, null);
+			ShowUpdateDialog ("无法检查更新", result.Message, "查看发布页", delegate { OpenWeb (UpdateService.ReleasesUrl); });
 			return;
 		}
 		if (!result.UpdateAvailable) {
-			statusText.Text = "当前为最新版";
-			ShowUpdateDialog ("当前为最新版", string.Concat ("已安装 Yike ", result.CurrentVersion, "，无需更新。"), null, null);
+			bool newerLocal = result.CurrentVersion > result.LatestVersion;
+			statusText.Text = newerLocal ? "本机版本高于 GitHub 已发布版本 " + result.LatestVersion.ToString (3) : "已确认：当前为 Windows 最新稳定版 " + result.CurrentVersion.ToString (3);
+			ShowUpdateDialog (newerLocal ? "当前无需更新" : "当前为最新版", "当前安装 " + result.CurrentVersion.ToString (3) + "\nGitHub Windows 稳定版 " + result.LatestVersion.ToString (3), "查看发布页", delegate { OpenWeb (result.ReleaseUrl); });
 			return;
 		}
-		statusText.Text = "发现新版本 " + result.LatestVersion;
-		ShowUpdateDialog ("是否要更新为最新版", string.Concat ("Yike ", result.LatestVersion, " 已可用。", string.IsNullOrWhiteSpace (result.Notes) ? "" : ("\n\n" + result.Notes)), "立即更新", delegate {
-			OpenWeb (result.DownloadUrl);
+		statusText.Text = "发现 Windows 新版本 " + result.LatestVersion.ToString (3);
+		ShowUpdateDialog ("发现 Windows 新版本", "当前安装 " + result.CurrentVersion.ToString (3) + " → " + result.LatestVersion.ToString (3) + "\n\n" + (result.Notes ?? "") + "\n\n更新将保留本机设置和历史。", result.CanInstall ? "下载并安装" : "查看发布页", async delegate {
+			if (result.CanInstall) await InstallUpdateAsync (result);
+			else OpenWeb (result.ReleaseUrl);
 		});
 	} finally {
+		if (object.ReferenceEquals (updateCheckCancel, cancellation)) updateCheckCancel = null;
+		cancellation.Dispose ();
 		button.Content = "检查更新";
 		button.IsEnabled = true;
 	}
@@ -117,7 +125,7 @@ private void ShowUpdateDialog (string heading, string message, string primaryCap
 		TextAlignment = TextAlignment.Center,
 		Margin = new Thickness (0.0, 10.0, 0.0, 0.0)
 	});
-	grid2.Children.Add (stackPanel2);
+	grid2.Children.Add (new ScrollViewer { Content = stackPanel2, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
 	StackPanel stackPanel3 = new StackPanel ();
 	stackPanel3.Orientation = System.Windows.Controls.Orientation.Horizontal;
 	stackPanel3.HorizontalAlignment = System.Windows.HorizontalAlignment.Center;
@@ -147,7 +155,7 @@ private void ShowUpdateDialog (string heading, string message, string primaryCap
 	Window owner = settingsWindow ?? window;
 	dialog = new Window {
 		Width = 570.0,
-		Height = 370.0,
+		Height = 500.0,
 		MinWidth = 520.0,
 		MinHeight = 340.0,
 		WindowStartupLocation = WindowStartupLocation.CenterOwner,

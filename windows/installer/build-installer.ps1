@@ -16,6 +16,9 @@ if (-not (Test-Path -LiteralPath $SourceExe)) {
 }
 $SourceExe = (Resolve-Path -LiteralPath $SourceExe).Path
 $releaseRoot = Split-Path -Parent $SourceExe
+$applicationVersion = [version][Diagnostics.FileVersionInfo]::GetVersionInfo($SourceExe).FileVersion
+$bundleVersion = [version](Get-Content -LiteralPath (Join-Path $releaseRoot 'update-feed.json') -Raw | ConvertFrom-Json).Version
+if ($applicationVersion -ne $bundleVersion) { throw '程序版本与安装包更新信息不一致，已停止打包。请更新 AssemblyInfo.cs 和 assets/update-feed.json 后重新构建。' }
 
 $OutputDirectory = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
     [IO.Path]::GetFullPath($OutputDirectory)

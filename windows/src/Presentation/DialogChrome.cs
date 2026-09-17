@@ -138,6 +138,7 @@ internal static class DialogChrome
 			ToggleMaximize (dialog);
 		};
 		grid3.MouseLeftButtonDown += delegate(object s, MouseButtonEventArgs e) {
+			if (IsInteractiveSource (e.OriginalSource as DependencyObject, grid3)) return;
 			if (e.ClickCount == 2) {
 				ToggleMaximize (dialog);
 				e.Handled = true;
@@ -155,6 +156,15 @@ internal static class DialogChrome
 			frame.CornerRadius = new CornerRadius ((dialog.WindowState == WindowState.Maximized) ? 0.0 : radius);
 		};
 		return dialog;
+	}
+
+	internal static bool IsInteractiveSource (DependencyObject hit, DependencyObject header)
+	{
+		while (hit != null && hit != header) {
+			if (hit is System.Windows.Controls.Primitives.ButtonBase || hit is System.Windows.Controls.Primitives.TextBoxBase || hit is System.Windows.Controls.Primitives.Selector) return true;
+			hit = (hit is Visual ? VisualTreeHelper.GetParent (hit) : null) ?? LogicalTreeHelper.GetParent (hit);
+		}
+		return false;
 	}
 
 	public static UIElement Body (Window dialog)

@@ -22,6 +22,7 @@ Yike 是一款基于 C#、WPF 和 DeepL API 的 Windows 桌面翻译工具，将
 - 朗读：提供在线自然语音和 Windows 本机语音。
 - 历史记录：保存文本和图片历史，支持收藏与删除。
 - 外观：浅色、深色和跟随系统主题，支持界面缩放、托盘和单实例运行。
+- 更新：从 GitHub 检查 Windows 稳定版，核对安装包大小和 SHA-256 后下载并安装，支持取消。
 
 ## 环境要求
 
@@ -32,9 +33,9 @@ Yike 是一款基于 C#、WPF 和 DeepL API 的 Windows 桌面翻译工具，将
 
 ## 安装与使用
 
-下载 [Yike Windows 1.2.2 完整安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.2) 中的 `Yike-Setup.exe`，运行后安装到当前用户目录，无需管理员权限。完整安装包包含语音运行库；GitHub Actions 的核心构建产物用于开发与检查。
+下载 [Yike Windows 1.2.3 完整安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.3) 中的 `Yike-Setup.exe`，运行后安装到当前用户目录，无需管理员权限。完整安装包包含语音运行库；GitHub Actions 的核心构建产物用于开发与检查。
 
-1.2.2 在划词小窗右上角新增关闭按钮，并包含语音输入即时显示、结束识别和朗读首段启动优化。详细变更见 [CHANGELOG.md](CHANGELOG.md)。
+1.2.3 修复应用内更新检查与版本一致性，权限页可检测真实组件状态，并修复设置跳转和窗口按钮行为；包含之前的划词小窗关闭按钮、语音输入和朗读优化。详细变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 安装包旁的 `SHA256SUMS.txt` 可用于校验下载内容。
 
@@ -113,7 +114,7 @@ third_party/         第三方许可证
 
 DeepL API 密钥通过 Windows DPAPI 按当前用户加密，偏好和历史保存在 `%LOCALAPPDATA%\Yike\`。文本翻译会将原文发送到 DeepL，图片 OCR 在本机执行，识别出的文字在翻译时发送到 DeepL。在线朗读会发送朗读文本至 Microsoft 语音服务，Whisper 语音识别在本机运行。
 
-仓库不包含真实密钥、账号数据或个人翻译记录。内置更新清单指向本项目的 Windows Releases，发布自己的版本时应替换为自己的下载地址，详见 [发布说明](docs/GITHUB.md)。
+仓库不包含真实密钥、账号数据或个人翻译记录。检查更新请求本项目的 GitHub Windows Releases，下载后验证大小和 SHA-256；联网失败不会用本地清单冒充最新版。发布自己的版本时请修改更新仓库地址，或配置自己的 HTTPS 清单，详见 [发布说明](docs/GITHUB.md)。
 
 ## 问题反馈与参与开发
 

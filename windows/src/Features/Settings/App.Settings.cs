@@ -72,6 +72,7 @@ private void ShowSettings (bool preview)
 private void ShowSettings (bool preview, string initialPage)
 {
 	if (!preview && settingsWindow != null) {
+		if (selectSettingsPage != null) selectSettingsPage (initialPage);
 		if (settingsWindow.WindowState == WindowState.Minimized) {
 			settingsWindow.WindowState = WindowState.Normal;
 		}
@@ -228,6 +229,7 @@ private void ShowSettings (bool preview, string initialPage)
 	titles ["about"] = new string[2] { "关于与更新", "认识 Yike，了解本次更新" };
 	Action<string> action = delegate(string key) {
 		
+		if (!pages.ContainsKey (key)) key = "appearance";
 		pageHost.Content = pages [key];
 		title.Text = titles [key] [0];
 		subtitle.Text = titles [key] [1];
@@ -259,7 +261,7 @@ private void ShowSettings (bool preview, string initialPage)
 	SetOverlayResources (dialog);
 	action (pages.ContainsKey (initialPage) ? initialPage : "appearance");
 	grid7.MouseLeftButtonDown += delegate(object s, MouseButtonEventArgs e) {
-		if (e.LeftButton == MouseButtonState.Pressed) {
+		if (!DialogChrome.IsInteractiveSource (e.OriginalSource as DependencyObject, grid7) && e.LeftButton == MouseButtonState.Pressed) {
 			dialog.DragMove ();
 		}
 	};
@@ -277,6 +279,8 @@ string path = initialPage == "deepl" ? "deepl-help.png" : initialPage == "about"
 	dialog.Closed += delegate {
 		cleanupSpeech ();
 		if (object.ReferenceEquals (settingsWindow, dialog)) {
+			if (updateCheckCancel != null) updateCheckCancel.Cancel ();
+			selectSettingsPage = null;
 			settingsWindow = null;
 		}
 		if (reopenForTheme && !preview) {
@@ -290,6 +294,7 @@ string path = initialPage == "deepl" ? "deepl-help.png" : initialPage == "about"
 		return;
 	}
 	settingsWindow = dialog;
+	selectSettingsPage = action;
 	dialog.Show ();
 	dialog.Activate ();
 }
@@ -379,13 +384,19 @@ private UIElement BuildShortcutPage ()
 	StackPanel stackPanel = new StackPanel ();
 	StackPanel stackPanel2 = Card (stackPanel, "\ue765", "划词翻译快捷键");
 	DockPanel dockPanel = new DockPanel ();
-	System.Windows.Controls.Button button = OverlayButton ("Ctrl + Shift + F", delegate {
-	});
-	button.IsHitTestVisible = false;
+	TextBlock button = Label ("Ctrl + Shift + F");
+	button.FontWeight = FontWeights.SemiBold;
+	button.Padding = new Thickness (12.0, 8.0, 12.0, 8.0);
 	DockPanel.SetDock (button, Dock.Right);
 	dockPanel.Children.Add (button);
 	dockPanel.Children.Add (Label ("在其他应用中选中文字，按快捷键打开翻译悬浮窗。"));
 	stackPanel2.Children.Add (dockPanel);
+	TextBlock hotkeyStatus = Label (selectionHotkeyRegistered ? "快捷键已注册，可以使用。" : "快捷键尚未注册或被其他程序占用。", true);
+	stackPanel2.Children.Add (hotkeyStatus);
+	stackPanel2.Children.Add (OverlayButton ("重新注册快捷键", delegate {
+		if (!selectionHotkeyRegistered && !previewMode) selectionHotkeyRegistered = Native.RegisterHotKey (new WindowInteropHelper (window).Handle, 1, 16390u, 70u);
+		hotkeyStatus.Text = selectionHotkeyRegistered ? "快捷键已注册，可以使用。" : "注册失败，请关闭占用 Ctrl+Shift+F 的程序后重试。";
+	}));
 	StackPanel stackPanel3 = Card (stackPanel, "\ue720", "按住空格语音输入");
 	stackPanel3.Children.Add (new TextBlock {
 		Text = "按住空格 0.3 秒开始语音输入，松开空格立即停止。",
@@ -393,7 +404,7 @@ private UIElement BuildShortcutPage ()
 		Foreground = OverlayBrush ("#EDF2F3"),
 		TextWrapping = TextWrapping.Wrap
 	});
-	TextBlock textBlock = Label ("也可以点击主界面的“语音输入”。正常说话后若连续 2 秒没有检测到声音，会自动停止。输入框为空且未处于编辑状态时快捷键生效。", true);
+	TextBlock textBlock = Label ("先点击原文输入框再按住空格说话；短按空格仍输入空格，可在已有文字后追加。也可以点击主界面的“语音输入”。正常说话后若连续 2 秒没有检测到声音，会自动停止。自动检测使用 Whisper，指定语言使用已安装的 Windows 识别组件。", true);
 	textBlock.Margin = new Thickness (0.0, 13.0, 0.0, 0.0);
 	stackPanel3.Children.Add (textBlock);
 	return SettingsPage (stackPanel);
@@ -439,7 +450,7 @@ private UIElement BuildAboutPage ()
 	StackPanel stackPanel = new StackPanel ();
 	StackPanel stackPanel2 = Card (stackPanel, "\ue946", "关于与更新");
 	stackPanel2.Children.Add (new TextBlock {
-		Text = "当前版本  Yike for Windows · " + typeof(App).Assembly.GetName ().Version.ToString (),
+		Text = "当前安装版本  Yike for Windows · " + typeof(App).Assembly.GetName ().Version.ToString (3),
 		FontSize = 16.0,
 		Foreground = OverlayBrush ("#EDF2F3"),
 		Margin = new Thickness (0.0, 0.0, 0.0, 10.0)
@@ -450,10 +461,10 @@ private UIElement BuildAboutPage ()
 		Foreground = OverlayBrush ("#EDF2F3"),
 		Margin = new Thickness (0.0, 0.0, 0.0, 12.0)
 	});
-	stackPanel2.Children.Add (Label ("一款专注于文字、截图与图片翻译的桌面工具。界面已统一为更清晰的深色圆角布局。", true));
+	stackPanel2.Children.Add (Label ("文字、截图与图片翻译工具。版本号来自正在运行的程序；GitHub 发布新版后，需要下载并安装才能更新本机。", true));
 	StackPanel stackPanel3 = Card (stackPanel, "\ue895", "检查更新");
 	DockPanel dockPanel = new DockPanel ();
-	TextBlock updateStatus = Label ("检查是否有新的稳定版本。", true);
+	TextBlock updateStatus = Label ("从 GitHub 检查 Windows 稳定版，不混用 macOS 版本。", true);
 	System.Windows.Controls.Button check = null;
 	check = OverlayButton ("检查更新", async delegate {
 		await CheckForUpdatesAsync (check, updateStatus);
@@ -463,6 +474,7 @@ private UIElement BuildAboutPage ()
 	dockPanel.Children.Add (check);
 	dockPanel.Children.Add (updateStatus);
 	stackPanel3.Children.Add (dockPanel);
+	stackPanel3.Children.Add (OverlayButton ("打开 GitHub 发布页", delegate { OpenWeb (UpdateService.ReleasesUrl); }));
 	StackPanel stackPanel4 = Card (stackPanel, "\ue7e8", "退出应用");
 	DockPanel dockPanel2 = new DockPanel ();
 	System.Windows.Controls.Button element = OverlayButton ("退出 Yike", delegate {
@@ -471,7 +483,7 @@ private UIElement BuildAboutPage ()
 	});
 	DockPanel.SetDock (element, Dock.Right);
 	dockPanel2.Children.Add (element);
-	dockPanel2.Children.Add (Label ("关闭所有 Yike 窗口，停止菜单栏与全局快捷键。", true));
+	dockPanel2.Children.Add (Label ("关闭所有 Yike 窗口，停止托盘、语音和全局快捷键。主窗口关闭按钮会收起到托盘。", true));
 	stackPanel4.Children.Add (dockPanel2);
 	return SettingsPage (stackPanel);
 }
@@ -570,14 +582,19 @@ private Action BuildSpeechCard (StackPanel cards)
 	};
 	speech.Changed += refresh;
 	refresh ();
-	stackPanel2.Children.Add (OverlayButton ("停止", delegate {
+	System.Windows.Controls.Button stop = OverlayButton ("停止", delegate {
 		speech.Stop ();
-	}));
+	});
+	stop.IsEnabled = speech.State != "idle";
+	Action refreshStop = delegate { stop.IsEnabled = speech.State != "idle"; };
+	speech.Changed += refreshStop;
+	stackPanel2.Children.Add (stop);
 	stackPanel2.Children.Add (OverlayButton ("管理语音包", delegate {
 		OpenSystem ("ms-settings:speech");
 	}));
 	return delegate {
 		speech.Changed -= refresh;
+		speech.Changed -= refreshStop;
 	};
 }
 
@@ -620,10 +637,28 @@ private void BuildOcrCard (StackPanel cards, Action close)
 private void BuildPermissionCard (StackPanel cards)
 {
 	StackPanel parent = Card (cards, "\ue72e", "系统与权限");
-	PermissionRow (parent, "划词翻译", "Ctrl+Shift+F · 松键后取词", null);
-	PermissionRow (parent, "语音输入 / 麦克风", "需允许桌面应用访问", "ms-settings:privacy-microphone");
-	PermissionRow (parent, "系统语音输入", "手动使用 Win+H 时需要", "ms-settings:privacy-speech");
-	PermissionRow (parent, "OCR 语言组件", "使用已安装的系统语言", "ms-settings:regionlanguage");
+	TextBlock hotkey = PermissionRow (parent, "划词翻译", selectionHotkeyRegistered ? "Ctrl+Shift+F 已注册" : "快捷键未注册，请到快捷键页重试", null);
+	TextBlock microphone = PermissionRow (parent, "麦克风", "点击刷新检测设备", "ms-settings:privacy-microphone");
+	TextBlock offline = PermissionRow (parent, "自动语音输入", WhisperSpeechInput.IsAvailable ? "Whisper 模型与运行库已就绪" : "缺少 Whisper 模型或运行库，请安装完整版本", null);
+	TextBlock recognizers = PermissionRow (parent, "指定语言语音输入", "点击刷新检查识别组件", "ms-settings:speech");
+	TextBlock ocr = PermissionRow (parent, "OCR 语言组件", "点击刷新检查已安装语言", "ms-settings:regionlanguage");
+	TextBlock refreshed = Label ("设备检测不录音；麦克风访问是否成功以实际启动结果为准。", true);
+	parent.Children.Add (refreshed);
+	System.Windows.Controls.Button refresh = null;
+	refresh = OverlayButton ("刷新状态", async delegate {
+		refresh.IsEnabled = false;
+		refreshed.Text = "正在检测本机组件…";
+		try {
+			hotkey.Text = selectionHotkeyRegistered ? "Ctrl+Shift+F 已注册" : "快捷键未注册，请到快捷键页重试";
+			offline.Text = WhisperSpeechInput.IsAvailable ? "Whisper 模型与运行库已就绪" : "缺少 Whisper 模型或运行库，请安装完整版本";
+			microphone.Text = await Task.Run (() => RuntimeStatus.Microphone ());
+			recognizers.Text = await Task.Run (() => RuntimeStatus.Recognizers ());
+			ocr.Text = await OcrService.InstalledLanguages ();
+			refreshed.Text = "已检测 " + DateTime.Now.ToString ("HH:mm:ss") + " · 麦克风访问以实际启动结果为准。";
+		} catch (Exception) { refreshed.Text = "部分组件无法检测，请打开对应系统设置确认后重试。"; }
+		finally { refresh.IsEnabled = true; }
+	});
+	parent.Children.Add (refresh);
 }
 
 
@@ -703,7 +738,7 @@ private void OpenSystem (string uri)
 }
 
 
-private void PermissionRow (StackPanel parent, string title, string state, string uri)
+private TextBlock PermissionRow (StackPanel parent, string title, string state, string uri)
 {
 	DockPanel dockPanel = new DockPanel ();
 	dockPanel.Margin = new Thickness (0.0, 7.0, 0.0, 7.0);
@@ -716,11 +751,13 @@ private void PermissionRow (StackPanel parent, string title, string state, strin
 		dockPanel2.Children.Add (element);
 	}
 	TextBlock textBlock = Label (state, true);
+	textBlock.MaxWidth = 350.0;
 	textBlock.Margin = new Thickness (12.0, 0.0, 12.0, 0.0);
 	DockPanel.SetDock (textBlock, Dock.Right);
 	dockPanel2.Children.Add (textBlock);
 	dockPanel2.Children.Add (Label (title));
 	parent.Children.Add (dockPanel2);
+	return textBlock;
 }
 
 }

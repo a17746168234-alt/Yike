@@ -660,6 +660,7 @@ public static partial class Tests
 
 	internal static void RunUpdateTests (List<string> lines)
 	{
+		UpdateTests.Run (lines);
 		Version version = new Version (1, 2, 0, 0);
 		UpdateCheckResult updateCheckResult = UpdateService.Parse ("{\"Version\":\"1.2.0.0\",\"DownloadUrl\":\"https://example.com/yike/releases\"}", version);
 		Check (updateCheckResult.Success && !updateCheckResult.UpdateAvailable && updateCheckResult.LatestVersion == version, "current update version was not recognized");

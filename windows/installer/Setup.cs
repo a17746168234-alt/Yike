@@ -170,6 +170,11 @@ internal static class Setup
 			Directory.CreateDirectory(text);
 			ExtractPayload(text);
 			ValidateInstallation(text);
+			if (File.Exists(installedExe)) {
+				Version currentVersion, payloadVersion;
+				if (Version.TryParse(FileVersionInfo.GetVersionInfo(installedExe).FileVersion, out currentVersion) &&
+					Version.TryParse(FileVersionInfo.GetVersionInfo(Path.Combine(text, "Yike.exe")).FileVersion, out payloadVersion) && currentVersion > payloadVersion) return;
+			}
 			StopInstalledProcess("Yike", installedExe);
 			StopInstalledProcess("whisper-stream", Path.Combine(root, "whisper-runtime", "Release", "whisper-stream.exe"));
 			StopInstalledProcess("WindowsTranslator", Path.Combine(legacyRoot, "WindowsTranslator.exe"));
@@ -286,7 +291,10 @@ internal static class Setup
 		using (RegistryKey registryKey = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Yike"))
 		{
 			registryKey.SetValue("DisplayName", "Yike");
-			registryKey.SetValue("DisplayVersion", "1.2.2");
+			Version installedVersion;
+			string fileVersion = FileVersionInfo.GetVersionInfo(exePath).FileVersion;
+			if (!Version.TryParse(fileVersion, out installedVersion)) throw new InvalidDataException("无法读取已安装程序的版本。");
+			registryKey.SetValue("DisplayVersion", installedVersion.ToString(3));
 			registryKey.SetValue("Publisher", "Yike");
 			registryKey.SetValue("InstallLocation", root);
 			registryKey.SetValue("DisplayIcon", (File.Exists(iconPath) ? iconPath : exePath) + ",0");

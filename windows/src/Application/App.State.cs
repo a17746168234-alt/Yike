@@ -94,6 +94,9 @@ private BitmapSource defaultAppIcon;
 
 
 private Window settingsWindow;
+private Action<string> selectSettingsPage;
+private bool selectionHotkeyRegistered;
+private CancellationTokenSource updateCheckCancel;
 
 
 private VoiceWaveform voiceWaveform;

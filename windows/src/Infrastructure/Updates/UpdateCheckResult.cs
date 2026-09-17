@@ -53,8 +53,12 @@ internal sealed class UpdateCheckResult
 	public string Notes { get; private set; }
 
 	public string Message { get; private set; }
+	public string ReleaseUrl { get; private set; }
+	public string Sha256 { get; private set; }
+	public long Size { get; private set; }
+	public bool CanInstall { get { return Success && UpdateAvailable && Sha256 != null && Size > 0; } }
 
-	public static UpdateCheckResult Found (Version current, Version latest, string url, string notes)
+	public static UpdateCheckResult Found (Version current, Version latest, string url, string notes, string releaseUrl = null, string sha256 = null, long size = 0)
 	{
 		UpdateCheckResult updateCheckResult = new UpdateCheckResult ();
 		updateCheckResult.Success = true;
@@ -63,6 +67,9 @@ internal sealed class UpdateCheckResult
 		updateCheckResult.LatestVersion = latest;
 		updateCheckResult.DownloadUrl = url;
 		updateCheckResult.Notes = notes;
+		updateCheckResult.ReleaseUrl = releaseUrl ?? url;
+		updateCheckResult.Sha256 = sha256;
+		updateCheckResult.Size = size;
 		return updateCheckResult;
 	}
 

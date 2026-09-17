@@ -42,11 +42,13 @@ git push -u origin main
 
 1. 将 assets/update-feed.json 的 DownloadUrl 改为自己仓库的 `https://github.com/YOUR_NAME/YOUR_REPOSITORY/releases`，当前 example.com 为占位示例。
 2. 按 README 构建完整版本、验证，再生成 Yike-Setup.exe。
-3. 更新 CHANGELOG，并保持 AssemblyInfo.cs、更新配置与 Setup.cs 安装器登记版本一致；若发布 MSIX，同时调整其版本参数。
+3. 更新 CHANGELOG，并保持 AssemblyInfo.cs 与 assets/update-feed.json 版本一致；安装器登记版本自动读取实际程序，打包时拒绝不一致的版本。若发布 MSIX，同时调整其版本参数。
 4. 在 GitHub Releases 发布版本标签和安装包，并附 SHA256。不要将安装包提交到源码目录。
 5. 保留第三方组件的实际许可证、版本和源码来源；打包脚本会附带仓库第三方说明和许可证，运行库目录内的其他包许可证也必须保留。
 
-需要远程更新配置时，可将 JSON 更新清单发布到自己的 HTTPS 地址，再在本机应用目录创建 update-source.txt 写入该地址。它属于本机配置，不提交到公开仓库。
+默认查询本仓库 GitHub Releases，使用 windows-vX.Y.Z 标签、Yike-Setup.exe 安装包，发布时上传完成再公开。草稿、预发布、macOS 标签和没有完成上传的安装包不会参与更新。安装包的 GitHub SHA-256 与大小用于下载验证；不要覆盖已发布标签。
+
+发布自己的分支时请修改 UpdateService.cs 的仓库地址。也可在本机应用目录创建 update-source.txt 写入自有 JSON 清单的 HTTPS 地址，兼容 Version、DownloadUrl、Notes 字段；此类自定义清单通过“查看发布页”手动下载。update-source.txt 属于本机配置，不提交公开仓库。
 
 ## 重新导出源码
 

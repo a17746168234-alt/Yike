@@ -13,6 +13,7 @@ $files = @(
     'packaging\store\AppxManifest.template.xml','packaging\store\build-store-msix.ps1',
     'tests\RegressionTests.cs',
     'tests\SpeechPlaybackTests.cs','tests\OnlineSpeechTests.py',
+    'tests\UpdateTests.cs',
     'tools\prepare-runtimes.ps1','tools\export-source.ps1',
     'docs\代码结构.md','docs\PRIVACY.md','docs\DEPENDENCIES.md','docs\GITHUB.md','docs\STORE.md',
     'docs\EXISTING_REPOSITORY.md','packaging\github\windows-ci-monorepo.yml',

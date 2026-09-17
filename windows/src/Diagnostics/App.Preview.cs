@@ -68,6 +68,8 @@ private async Task RunPreview (string[] args)
 		VerifyTheme ();
 	} else if (args.Contains ("--ui-audit-test")) {
 		VerifyUiAudit ();
+	} else if (args.Contains ("--functional-ui-test")) {
+		await VerifyFunctionalUiAsync ();
 	} else if (args.Contains ("--settings-preview")) {
 		SettingsPreview ();
 	} else if (args.Contains ("--engine-preview")) {

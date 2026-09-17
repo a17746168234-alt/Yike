@@ -40,6 +40,28 @@ using Microsoft.Win32;
 namespace WindowsTranslator {
 public static class OcrService
 {
+	public static async Task<string> InstalledLanguages ()
+	{
+		string output = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "yike-ocr-languages-" + Guid.NewGuid ().ToString ("N") + ".json");
+		try {
+			using (Process process = Process.Start (new ProcessStartInfo {
+				FileName = System.IO.Path.Combine (Environment.GetFolderPath (Environment.SpecialFolder.System), "WindowsPowerShell\\v1.0\\powershell.exe"),
+				Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + System.IO.Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "ocr.ps1") + "\" -ListLanguages -OutputPath \"" + output + "\"",
+				UseShellExecute = false, CreateNoWindow = true
+			})) {
+				if (process == null) throw new InvalidOperationException ();
+				using (ProcessJob.AttachOrTerminate (process)) {
+					if (!await Task.Run (() => process.WaitForExit (10000))) { process.Kill (); throw new TimeoutException (); }
+					if (process.ExitCode != 0 || !File.Exists (output)) throw new InvalidOperationException ();
+					OcrLanguages result = Store.Json.Deserialize<OcrLanguages> (File.ReadAllText (output));
+					return result.Languages == null || result.Languages.Length == 0 ? "未安装 OCR 语言组件，请安装所需语言" : string.Join ("、", result.Languages);
+				}
+			}
+		} catch (Exception) { return "无法检测 OCR 语言组件，请打开系统语言设置确认"; }
+		finally { if (File.Exists (output)) File.Delete (output); }
+	}
+	private sealed class OcrLanguages { public string[] Languages { get; set; } }
+
 	public static async Task<OcrDocument> Ocr (string path, string language)
 	{
 		string output = System.IO.Path.Combine (System.IO.Path.GetTempPath (), string.Concat ("translator-ocr-", Guid.NewGuid (), ".json"));

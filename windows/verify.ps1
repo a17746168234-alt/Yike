@@ -14,7 +14,7 @@ function Run-Verification([string[]]$Arguments) {
 Run-Verification @('--self-test')
 if (!(Get-Content (Join-Path $outputRoot 'test-results.txt') -Raw).Contains('ALL TESTS PASSED')) { throw 'Regression tests failed.' }
 if ($SelfTestOnly) { Get-Content (Join-Path $outputRoot 'test-results.txt'); return }
-foreach ($check in @(@{Argument='--theme-test';Report='theme-test-results.txt'},@{Argument='--zoom-test';Report='zoom-test-results.txt'},@{Argument='--ui-audit-test';Report='ui-audit-results.txt'})) {
+foreach ($check in @(@{Argument='--theme-test';Report='theme-test-results.txt'},@{Argument='--zoom-test';Report='zoom-test-results.txt'},@{Argument='--ui-audit-test';Report='ui-audit-results.txt'},@{Argument='--functional-ui-test';Report='functional-ui-results.txt'})) {
     Run-Verification @('--render-preview',$check.Argument)
     if (!(Get-Content (Join-Path $outputRoot $check.Report) -Raw).StartsWith('PASS:')) { throw "Verification failed: $($check.Report)" }
 }

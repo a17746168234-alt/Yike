@@ -43,6 +43,10 @@ public partial class App {
 public static void Main (string[] args)
 {
 	ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+	if (args.Contains ("--update-service-test")) {
+		UpdateTests.Live (args.Contains ("--download-update-test"));
+		return;
+	}
 	if (args.Contains ("--self-test")) {
 		Tests.Run ();
 		return;
@@ -128,7 +132,8 @@ private void Start (System.Windows.Application app, string[] args)
 	window.SourceInitialized += delegate {
 		IntPtr handle = new WindowInteropHelper (window).Handle;
 		HwndSource.FromHwnd (handle).AddHook (Hook);
-		if (!args.Contains ("--render-preview") && !Native.RegisterHotKey (handle, 1, 16390u, 70u)) {
+		selectionHotkeyRegistered = !previewMode && Native.RegisterHotKey (handle, 1, 16390u, 70u);
+		if (!previewMode && !selectionHotkeyRegistered) {
 			SelectionError ("Ctrl+Shift+F 注册失败，可能已被其他程序占用。请关闭冲突程序后重启 Yike。");
 		}
 		ApplyAppearance ();
@@ -141,6 +146,7 @@ private void Start (System.Windows.Application app, string[] args)
 		}
 	};
 	window.Closed += delegate {
+		if (updateCheckCancel != null) updateCheckCancel.Cancel ();
 		Cancel ();
 		CloseActiveSelection ();
 		speech.Dispose ();

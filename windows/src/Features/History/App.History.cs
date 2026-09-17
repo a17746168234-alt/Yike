@@ -260,7 +260,7 @@ private void HistoryCenter (bool preview, string initialTab)
 	dialog.MinHeight = 620.0;
 	SetOverlayResources (dialog);
 	grid4.MouseLeftButtonDown += delegate(object s, MouseButtonEventArgs e) {
-		if (e.LeftButton == MouseButtonState.Pressed) {
+		if (!DialogChrome.IsInteractiveSource (e.OriginalSource as DependencyObject, grid4) && e.LeftButton == MouseButtonState.Pressed) {
 			dialog.DragMove ();
 		}
 	};

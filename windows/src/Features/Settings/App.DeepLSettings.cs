@@ -222,7 +222,7 @@ private void EngineMenu (bool preview)
 	}
 	dialog = OverlayDialog ("DeepL 密钥与帮助", 680.0, 560.0, grid2);
 	grid3.MouseLeftButtonDown += delegate(object s, MouseButtonEventArgs e) {
-		if (e.LeftButton == MouseButtonState.Pressed) {
+		if (!DialogChrome.IsInteractiveSource (e.OriginalSource as DependencyObject, grid3) && e.LeftButton == MouseButtonState.Pressed) {
 			dialog.DragMove ();
 		}
 	};

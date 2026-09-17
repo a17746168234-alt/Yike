@@ -231,6 +231,7 @@ private void UpdateActionAvailability ()
 	Find<System.Windows.Controls.Button> ("ClearButton").IsEnabled = flag || flag3 || original != null;
 	Find<System.Windows.Controls.Button> ("CopyButton").IsEnabled = flag3;
 	Find<System.Windows.Controls.Button> ("SpeakButton").IsEnabled = flag2;
+	Find<System.Windows.Controls.Button> ("ImageToolsButton").IsEnabled = original != null;
 }
 
 }

@@ -137,6 +137,7 @@ private void VerifyUiAudit ()
 		}
 		input.Clear ();
 		voiceDraft.Cancel ();
+		if (Find<System.Windows.Controls.Button> ("ImageToolsButton").IsEnabled) throw new Exception ("没有图片时译图工具仍可点击空操作。");
 		if (Find<System.Windows.Controls.Button> ("TranslateButton").IsEnabled || Find<System.Windows.Controls.Button> ("ClearButton").IsEnabled || Find<System.Windows.Controls.Button> ("SpeakButton").IsEnabled || Find<System.Windows.Controls.Button> ("CopyButton").IsEnabled) {
 			throw new Exception ("空状态操作按钮没有正确禁用。");
 		}
