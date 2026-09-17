@@ -9,6 +9,8 @@
 
 Windows 版采用 C# / WPF，翻译需配置自己的 DeepL API 密钥。
 
+Windows 下载：[Yike Windows 1.2.0 完整安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.0)（x64，包含语音运行库）。
+
 ## macOS 版说明
 
 macOS 原生翻译应用，支持中文、英文、日文和韩文。
