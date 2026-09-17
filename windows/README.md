@@ -32,7 +32,9 @@ Yike 是一款基于 C#、WPF 和 DeepL API 的 Windows 桌面翻译工具，将
 
 ## 安装与使用
 
-如果仓库已发布安装包，可在本仓库的 **Releases** 页面下载 `Yike-Setup.exe`，运行后安装到当前用户目录，无需管理员权限。
+下载 [Yike Windows 1.2.0 完整安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.0) 中的 `Yike-Setup.exe`，运行后安装到当前用户目录，无需管理员权限。完整安装包包含语音运行库；GitHub Actions 的核心构建产物用于开发与检查。
+
+安装包旁的 `SHA256SUMS.txt` 可用于校验下载内容。
 
 1. 打开 Yike，点击顶部 **DeepL** 按钮。
 2. 输入自己的 API 密钥并保存；程序根据密钥选择 API Free / Pro 地址。
