@@ -1,5 +1,16 @@
 # Yike
 
+## 平台版本
+
+| 平台 | 源码 | 使用与构建说明 |
+| --- | --- | --- |
+| macOS | [Mac 源码](native/) | 见本文下方 |
+| Windows | [Windows 源码](windows/) | [Windows 版说明](windows/README.md) |
+
+Windows 版采用 C# / WPF，翻译需配置自己的 DeepL API 密钥。
+
+## macOS 版说明
+
 macOS 原生翻译应用，支持中文、英文、日文和韩文。
 基于早期 Codex 版「翻译」工程二次开发，Bundle ID 为 `com.yijian.translator.kimi`。
 
