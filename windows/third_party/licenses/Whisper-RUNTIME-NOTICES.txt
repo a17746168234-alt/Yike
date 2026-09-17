@@ -1,0 +1,16 @@
+Yike includes whisper.cpp and a quantized OpenAI Whisper base multilingual model.
+
+whisper.cpp
+Copyright (c) 2023-2026 The ggml authors
+License: MIT
+Source: https://github.com/ggml-org/whisper.cpp
+
+OpenAI Whisper model
+Copyright (c) 2022 OpenAI
+License: MIT
+Source: https://github.com/openai/whisper
+
+SDL2 runtime
+Copyright (C) 1997-2026 Sam Lantinga
+License: zlib
+Source: https://github.com/libsdl-org/SDL
