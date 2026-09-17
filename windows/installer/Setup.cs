@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -286,7 +286,7 @@ internal static class Setup
 		using (RegistryKey registryKey = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Yike"))
 		{
 			registryKey.SetValue("DisplayName", "Yike");
-			registryKey.SetValue("DisplayVersion", "1.2.0");
+			registryKey.SetValue("DisplayVersion", "1.2.2");
 			registryKey.SetValue("Publisher", "Yike");
 			registryKey.SetValue("InstallLocation", root);
 			registryKey.SetValue("DisplayIcon", (File.Exists(iconPath) ? iconPath : exePath) + ",0");

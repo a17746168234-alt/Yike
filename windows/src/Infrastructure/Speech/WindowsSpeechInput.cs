@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -84,6 +84,8 @@ internal sealed class WindowsSpeechInput : ISpeechInputBackend, IDisposable
 				throw new InvalidOperationException ("未安装该语言的 Windows 语音识别组件，请切换为自动检测。");
 			}
 			engine = new SpeechRecognitionEngine (recognizerInfo);
+			engine.EndSilenceTimeout = TimeSpan.FromMilliseconds (350);
+			engine.EndSilenceTimeoutAmbiguous = TimeSpan.FromMilliseconds (600);
 			engine.LoadGrammar (new DictationGrammar ());
 			engine.SpeechDetected += delegate {
 				SpeechActivity ();

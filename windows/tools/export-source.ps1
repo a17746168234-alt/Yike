@@ -1,4 +1,4 @@
-﻿param([string]$OutputFile='', [switch]$ForExistingRepository)
+param([string]$OutputFile='', [switch]$ForExistingRepository)
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if ([string]::IsNullOrWhiteSpace($OutputFile)) {
@@ -12,6 +12,7 @@ $files = @(
     'installer\Setup.cs','installer\uninstall.ps1','installer\build-installer.ps1',
     'packaging\store\AppxManifest.template.xml','packaging\store\build-store-msix.ps1',
     'tests\RegressionTests.cs',
+    'tests\SpeechPlaybackTests.cs','tests\OnlineSpeechTests.py',
     'tools\prepare-runtimes.ps1','tools\export-source.ps1',
     'docs\代码结构.md','docs\PRIVACY.md','docs\DEPENDENCIES.md','docs\GITHUB.md','docs\STORE.md',
     'docs\EXISTING_REPOSITORY.md','packaging\github\windows-ci-monorepo.yml',

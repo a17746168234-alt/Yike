@@ -31,6 +31,8 @@ jobs:
         run: .\build.ps1 -OutputDirectory dist\ci -SkipRuntimes
       - name: Run offline regression tests
         run: .\verify.ps1 -OutputDirectory dist\ci -SkipBuild -SelfTestOnly
+      - name: Run offline speech connection tests
+        run: python .\tests\OnlineSpeechTests.py
       - name: Upload Windows core build and test report
         uses: actions/upload-artifact@v7
         with:

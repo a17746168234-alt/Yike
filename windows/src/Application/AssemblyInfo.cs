@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -43,11 +43,10 @@ using Microsoft.Win32;
 
 [assembly: CompilationRelaxations (8)]
 
-[assembly: AssemblyFileVersion ("1.2.0.0")]
+[assembly: AssemblyFileVersion ("1.2.2.0")]
 
 [assembly: RuntimeCompatibility (WrapNonExceptionThrows = true)]
 
 [assembly: AssemblyTitle ("Yike")]
 
-[assembly: AssemblyVersion ("1.2.0.0")]
-
+[assembly: AssemblyVersion ("1.2.2.0")]

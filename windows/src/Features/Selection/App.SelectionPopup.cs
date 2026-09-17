@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -97,6 +97,9 @@ private SelectionPopup CreateSelectionPopup (string original, string targetCode,
 	((System.Windows.Controls.Button)popup.FindName ("ClosePopup")).Click += delegate {
 		popup.Close ();
 	};
+	((System.Windows.Controls.Button)popup.FindName ("ClosePopupButton")).Click += delegate {
+		popup.Close ();
+	};
 	((System.Windows.Controls.Button)popup.FindName ("MinimizePopup")).Click += delegate {
 		popup.WindowState = WindowState.Minimized;
 	};
@@ -118,7 +121,12 @@ private SelectionPopup CreateSelectionPopup (string original, string targetCode,
 		maximize.ToolTip = ((popup.WindowState == WindowState.Maximized) ? "还原窗口" : "最大化");
 	};
 	((Grid)popup.FindName ("DragHeader")).MouseLeftButtonDown += delegate(object s, MouseButtonEventArgs e) {
-		if (!(e.OriginalSource is System.Windows.Controls.Primitives.ButtonBase)) {
+		DependencyObject hit = e.OriginalSource as DependencyObject;
+		while (hit != null && hit != s) {
+			if (hit is System.Windows.Controls.Primitives.ButtonBase) return;
+			hit = hit is Visual ? VisualTreeHelper.GetParent (hit) : LogicalTreeHelper.GetParent (hit);
+		}
+		if (hit == s) {
 			if (e.ClickCount == 2) {
 				toggleSize ();
 				e.Handled = true;

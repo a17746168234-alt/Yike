@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -49,6 +49,8 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 	private readonly WhisperStreamParser parser = new WhisperStreamParser ();
 
 	private readonly Stopwatch elapsed = new Stopwatch ();
+	private readonly Func<ProcessStartInfo> createHelper;
+	private readonly Func<int> readLevel;
 
 	private Process process;
 
@@ -57,6 +59,8 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 	private Task completion;
 
 	private System.Threading.Timer poll;
+
+	private System.Threading.Timer stopGuard;
 
 	private MicrophoneLevel meter;
 
@@ -69,6 +73,7 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 	private bool ready;
 
 	private bool heardAudio;
+	private bool receivedText;
 
 	private long readyAt;
 
@@ -135,8 +140,12 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 
 	public event Action<int> AudioLevelChanged;
 
-	public WhisperSpeechInput ()
+	public WhisperSpeechInput () : this (null, null) {}
+
+	internal WhisperSpeechInput (Func<ProcessStartInfo> createHelper, Func<int> readLevel)
 	{
+		this.createHelper = createHelper;
+		this.readLevel = readLevel;
 		WhisperStreamParser whisperStreamParser = parser;
 		Action value = delegate {
 			ready = true;
@@ -154,7 +163,7 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 	public bool Start (string language, out string error)
 	{
 		error = null;
-		if (!IsAvailable) {
+		if (createHelper == null && !IsAvailable) {
 			error = "离线识别组件缺失，请重新安装完整版本。";
 			return false;
 		}
@@ -168,12 +177,14 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 			processStartInfo.RedirectStandardError = true;
 			processStartInfo.StandardOutputEncoding = Encoding.UTF8;
 			processStartInfo.StandardErrorEncoding = Encoding.UTF8;
-			processStartInfo.Arguments = "-m \"..\\ggml-base-q5_1.bin\" -l auto --step " + 600 + " --length " + 2400 + " --keep 0 -mt 64 -t " + Math.Max (2, Math.Min (6, Environment.ProcessorCount / 2)) + " -ng -nf";
+			processStartInfo.Arguments = "-m \"..\\ggml-base-q5_1.bin\" -l auto --step " + StepMilliseconds + " --length " + WindowMilliseconds + " --keep 0 -ac 256 -t " + Math.Max (2, Math.Min (6, Environment.ProcessorCount / 2)) + " -ng -nf";
 			ProcessStartInfo startInfo = processStartInfo;
+			if (createHelper != null) startInfo = createHelper ();
 			lock (sync) {
 				if (process != null || disposed) {
 					throw new InvalidOperationException ("录音会话不能重复启动。");
 				}
+				if (readLevel == null) meter = new MicrophoneLevel ();
 				process = Process.Start (startInfo);
 				if (process == null) {
 					throw new InvalidOperationException ("无法启动离线识别进程。");
@@ -224,10 +235,13 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 					parser.Complete ();
 					if (!stopping) {
 						text = (string.IsNullOrWhiteSpace (lastError) ? "离线识别已中断，请检查麦克风或重新安装应用。" : lastError);
+					} else if (heardAudio && !receivedText) {
+						text = "未识别到清晰语音，请靠近麦克风后重试。";
 					}
 				}
 				listening = false;
 				ReleasePolling ();
+				if (stopGuard != null) { stopGuard.Dispose (); stopGuard = null; }
 				processJob = this.processJob;
 				this.processJob = null;
 			}
@@ -243,19 +257,14 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 
 	private async Task ReadOutput (Process active)
 	{
-		char[] chars = new char[1024];
-		while (true) {
-			int num;
-			int count = (num = await active.StandardOutput.ReadAsync (chars, 0, chars.Length).ConfigureAwait (false));
-			if (num <= 0) {
-				break;
-			}
+		await Utf8PipeReader.Read (active.StandardOutput.BaseStream, delegate(string chunk) {
 			lock (sync) {
 				if (!disposed) {
-					parser.Feed (new string (chars, 0, count));
+					parser.Feed (chunk);
+					parser.Preview ();
 				}
 			}
-		}
+		}).ConfigureAwait (false);
 	}
 
 	private async Task ReadErrors (Process active)
@@ -279,6 +288,7 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 		if (disposed || !heardAudio) {
 			return;
 		}
+		receivedText = true;
 		if (final) {
 			if (this.Recognized != null) {
 				this.Recognized (text);
@@ -298,23 +308,19 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 				return;
 			}
 			long elapsedMilliseconds = elapsed.ElapsedMilliseconds;
+			try {
+				int level = readLevel == null ? meter.Read () : readLevel ();
+				if (level > 0) { heardAudio = true; lastAudio = elapsedMilliseconds; }
+				if (ready && this.AudioLevelChanged != null) this.AudioLevelChanged (level);
+			} catch (Exception ex) {
+				text = "无法读取麦克风音量：" + ex.Message;
+			}
 			if (!ready) {
 				if (elapsedMilliseconds > 20000) {
 					text = "离线语音模型启动超时，请重新尝试。";
 				}
 			} else {
 				try {
-					if (meter == null) {
-						meter = new MicrophoneLevel ();
-					}
-					int num = meter.Read ();
-					if (num > 0) {
-						heardAudio = true;
-						lastAudio = elapsedMilliseconds;
-					}
-					if (this.AudioLevelChanged != null) {
-						this.AudioLevelChanged (num);
-					}
 					parser.Preview ();
 					flag2 = !heardAudio;
 					flag = (flag2 ? (elapsedMilliseconds - readyAt >= 8000) : (elapsedMilliseconds - lastAudio >= 2000));
@@ -344,7 +350,7 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 	public bool Stop ()
 	{
 		Process active;
-		ProcessJob processJob;
+		bool drain;
 		lock (sync) {
 			if (!listening) {
 				return false;
@@ -352,15 +358,14 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 			stopping = true;
 			listening = false;
 			active = process;
-			processJob = this.processJob;
-			this.processJob = null;
+			drain = ready && heardAudio;
 			parser.Preview ();
 			ReleasePolling ();
+			// Let the already captured final words finish before closing the pipe.
+			// Cancel/dispose still terminates immediately when a new session starts.
+			if (drain) stopGuard = new System.Threading.Timer (delegate { Terminate (active); }, null, SpeechInput.GracefulStopMilliseconds, -1);
 		}
-		if (processJob != null) {
-			processJob.Dispose ();
-		}
-		Terminate (active);
+		if (!drain) Terminate (active);
 		return true;
 	}
 
@@ -410,6 +415,7 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 			processJob = this.processJob;
 			this.processJob = null;
 			ReleasePolling ();
+			if (stopGuard != null) { stopGuard.Dispose (); stopGuard = null; }
 		}
 		if (processJob != null) {
 			processJob.Dispose ();

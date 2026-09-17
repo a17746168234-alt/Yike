@@ -1,5 +1,5 @@
 {
-  "Version": "1.2.0.0",
-  "DownloadUrl": "https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.0",
-  "Notes": "Yike Windows 1.2.0，完整安装包包含语音运行库。"
+  "Version": "1.2.2.0",
+  "DownloadUrl": "https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.2",
+  "Notes": "Yike Windows 1.2.2：划词小窗新增右上角关闭按钮，优化语音输入和朗读启动速度；完整安装包包含语音运行库。"
 }

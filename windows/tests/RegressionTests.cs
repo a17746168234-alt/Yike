@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -38,7 +38,7 @@ using System.Windows.Shell;
 using System.Windows.Threading;
 using Microsoft.Win32;
 namespace WindowsTranslator {
-public static class Tests
+public static partial class Tests
 {
 	private class Fake : HttpMessageHandler
 	{
@@ -214,12 +214,14 @@ public static class Tests
 	{
 		string report = System.IO.Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "speech-test-results.txt");
 		try {
+			await SpeechQueueIntegration ();
 			using (SpeechPlayer speech = new SpeechPlayer (0.0)) {
 				string error = null;
 				speech.Failed += delegate(string message) {
 					error = message;
 				};
-				await speech.Speak ("This is a natural male voice test. Pause and resume should preserve the current playback position, and stopping should cancel the entire request.", "EN-US", "male", 0, true);
+				Stopwatch clock = Stopwatch.StartNew ();
+				Task synthesis = speech.Speak ("This is a natural male voice test. Pause and resume should preserve the current playback position, and stopping should cancel the entire request.", "EN-US", "male", 0, true);
 				for (int i = 0; i < 80; i++) {
 					if (!(speech.State == "loading")) {
 						break;
@@ -227,6 +229,7 @@ public static class Tests
 					await Task.Delay (100);
 				}
 				Check (error == null && speech.State == "playing", "online playback did not start: " + error);
+				long firstAudio = clock.ElapsedMilliseconds;
 				await Task.Delay (400);
 				speech.TogglePause ();
 				Check (speech.State == "paused", "pause failed");
@@ -237,14 +240,16 @@ public static class Tests
 				await Task.Delay (600);
 				Check (speech.State == "playing" && speech.Position > paused, "resume did not continue playback");
 				speech.Stop ();
+				await synthesis;
 				Check (speech.State == "idle", "stop failed");
 				Task pending = speech.Speak ("A canceled request must not resume playing.", "EN-US", "male", 0, true);
 				speech.Stop ();
 				await pending;
 				await Task.Delay (300);
 				Check (speech.State == "idle", "canceled request played stale audio");
+				File.WriteAllText (System.IO.Path.Combine (AppDomain.CurrentDomain.BaseDirectory, "speech-start-latency.txt"), "Online English first playback: " + firstAudio + " ms");
 			}
-			File.WriteAllText (report, "PASS: real online English male playback; pause freezes position; resume advances; stop and in-flight cancellation keep player idle.");
+			File.WriteAllText (report, "PASS: first segment plays while later synthesis is blocked; pause/resume across segment boundaries; cancel and replace reject stale audio; real online English playback and cancellation.");
 		} catch (Exception ex) {
 			File.WriteAllText (report, "FAIL: " + ex);
 			Environment.ExitCode = 1;
@@ -522,6 +527,52 @@ public static class Tests
 
 	private static void RunSpeechRegressionTests (List<string> lines)
 	{
+		string pipeName = "YikeSpeechTest-" + Guid.NewGuid ().ToString ("N");
+		using (var receiver = new System.IO.Pipes.NamedPipeServerStream (pipeName, System.IO.Pipes.PipeDirection.In, 1, System.IO.Pipes.PipeTransmissionMode.Byte, System.IO.Pipes.PipeOptions.Asynchronous))
+		using (var sender = new System.IO.Pipes.NamedPipeClientStream (".", pipeName, System.IO.Pipes.PipeDirection.Out, System.IO.Pipes.PipeOptions.Asynchronous)) {
+			Task connection = Task.Run (() => receiver.WaitForConnection ());
+			sender.Connect (2000);
+			Check (connection.Wait (2000), "speech pipe did not connect");
+			StringBuilder receivedBytes = new StringBuilder ();
+			Task output = Utf8PipeReader.Read (receiver, delegate(string chunk) { lock (receivedBytes) receivedBytes.Append (chunk); });
+			byte[] bytes = Encoding.UTF8.GetBytes ("[Start speaking]\n你好");
+			// Deliver one byte of a Chinese character in a separate pipe write.
+			sender.Write (bytes, 0, bytes.Length - 2);
+			sender.Flush ();
+			Check (SpinWait.SpinUntil (() => { lock (receivedBytes) return receivedBytes.ToString ().Contains ("[Start speaking]\n你"); }, 1500), "short speech output was held until buffer full or EOF");
+			sender.Write (bytes, bytes.Length - 2, 2);
+			sender.Flush ();
+			Check (SpinWait.SpinUntil (() => { lock (receivedBytes) return receivedBytes.ToString ().EndsWith ("你好"); }, 1500), "split UTF-8 speech characters were lost");
+			sender.Dispose ();
+			Check (output.Wait (2000), "speech pipe did not drain at EOF");
+		}
+		lines.Add ("PASS speech: short flushed pipe output arrives before EOF; split UTF-8 remains intact");
+		string producer = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Console]::WriteLine('[Start speaking]'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 200; [Console]::Write('你好'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 800; [Console]::WriteLine(' 世界'); [Console]::Out.Flush(); Start-Sleep -Seconds 30";
+		List<string> liveResults = new List<string> ();
+		using (var live = new WhisperSpeechInput (delegate {
+			return new ProcessStartInfo {
+				FileName = System.IO.Path.Combine (Environment.GetFolderPath (Environment.SpecialFolder.System), "WindowsPowerShell\\v1.0\\powershell.exe"),
+				Arguments = "-NoProfile -NonInteractive -EncodedCommand " + Convert.ToBase64String (Encoding.Unicode.GetBytes (producer)),
+				UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+				StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+			};
+		}, () => 30)) {
+			live.Hypothesized += text => { lock (liveResults) liveResults.Add ("P:" + text); };
+			live.Recognized += text => { lock (liveResults) liveResults.Add ("F:" + text); };
+			string error;
+			Check (live.Start (out error), "speech producer failed: " + error);
+			Check (SpinWait.SpinUntil (() => { lock (liveResults) return liveResults.Contains ("P:你好"); }, 5000) && live.IsReady, "real backend did not deliver flushed draft while producer remained alive");
+			Check (live.Stop () && !live.IsListening, "stop did not end listening immediately");
+			Check (live.Completion.Wait (5000), "speech final-result drain did not terminate producer");
+			lock (liveResults) Check (liveResults.Count (text => text == "F:你好 世界") == 1, "stop discarded or duplicated the in-flight final words");
+		}
+		lines.Add ("PASS speech: backend delivers drafts before helper exit; stopping preserves exactly one in-flight final result");
+		foreach (string passage in new[] { "你好，这是语音朗读测试。" + new string ('中', 500) + "😀结束。  ", new string (' ', 200) + "Hello. " + string.Join (" ", Enumerable.Repeat ("A complete English sentence.", 80)) }) {
+			string[] chunks = SpeechChunks.Split (passage);
+			Check (chunks.Length > 1 && string.Concat (chunks) == passage && chunks.All (chunk => !string.IsNullOrWhiteSpace (chunk)), "speech chunks lost or duplicated text");
+			Check (chunks.All (chunk => !char.IsHighSurrogate (chunk[chunk.Length - 1]) && !char.IsLowSurrogate (chunk[0])), "speech chunks split surrogate pairs");
+		}
+		lines.Add ("PASS speech: bilingual long passages split without losing text or Unicode characters");
 		WhisperStreamParser whisperStreamParser = new WhisperStreamParser ();
 		List<string> events = new List<string> ();
 		int ready = 0;

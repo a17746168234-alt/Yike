@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -40,240 +40,219 @@ using Microsoft.Win32;
 namespace WindowsTranslator {
 public sealed class SpeechPlayer : IDisposable
 {
-	private MediaPlayer player;
+    private MediaPlayer player;
+    private CancellationTokenSource pending;
+    private readonly Queue<string> ready = new Queue<string> ();
+    private string folder, audioPath;
+    private int revision;
+    private bool generated, paused;
+    private TimeSpan pausedPosition, completedPosition;
+    private readonly double volume;
+    private readonly Func<string, bool, ProcessStartInfo> createHelper;
 
-	private CancellationTokenSource pending;
+    public string State { get; private set; }
+    internal TimeSpan Position {
+        get { return completedPosition + (player == null ? TimeSpan.Zero : (paused ? pausedPosition : player.Position)); }
+    }
+    internal bool IsGenerating { get { return pending != null; } }
+    public event Action Changed;
+    public event Action<string> Failed;
 
-	private string audioPath;
+    public SpeechPlayer (double volume = 1.0) : this (volume, null) {}
 
-	private int revision;
+    internal SpeechPlayer (double volume, Func<string, bool, ProcessStartInfo> createHelper)
+    {
+        this.volume = volume;
+        this.createHelper = createHelper;
+        State = "idle";
+    }
 
-	private TimeSpan pausedPosition;
+    private void SetState (string state) { State = state; if (Changed != null) Changed (); }
 
-	private readonly double volume;
+    public static string Voice (string language, string gender)
+    {
+        bool male = gender == "male";
+        switch (language) {
+        case "EN-US": return male ? "en-US-GuyNeural" : "en-US-JennyNeural";
+        case "JA": return male ? "ja-JP-KeitaNeural" : "ja-JP-NanamiNeural";
+        case "KO": return male ? "ko-KR-InJoonNeural" : "ko-KR-SunHiNeural";
+        default: return male ? "zh-CN-YunxiNeural" : "zh-CN-XiaoxiaoNeural";
+        }
+    }
 
-	public string State { get; private set; }
+    public async Task Speak (string text, string language, string gender, int rate, bool online)
+    {
+        Stop ();
+        string[] chunks = SpeechChunks.Split (text);
+        if (chunks.Length == 0) return;
+        int ticket = revision;
+        CancellationTokenSource cancel = pending = new CancellationTokenSource ();
+        CancellationToken ct = cancel.Token;
+        string requestFolder = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "YikeSpeech", Guid.NewGuid ().ToString ("N"));
+        string jobPath = System.IO.Path.Combine (requestFolder, "job.json");
+        folder = requestFolder;
+        try {
+            Directory.CreateDirectory (requestFolder);
+            File.WriteAllText (jobPath, Store.Json.Serialize (new {
+                chunks = chunks, folder = requestFolder,
+                voice = Voice (language, gender), language = language, gender = gender,
+                rate = Math.Max (-50, Math.Min (50, rate * 5)),
+                proxy = online ? ProxySettings.Current : null
+            }), Encoding.UTF8);
+            SetState ("loading");
+            string root = AppDomain.CurrentDomain.BaseDirectory;
+            ProcessStartInfo start = new ProcessStartInfo {
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            if (online) {
+                start.FileName = System.IO.Path.Combine (root, "speech-runtime", "python.exe");
+                start.Arguments = "\"" + System.IO.Path.Combine (root, "speech-online.py") + "\" \"" + jobPath + "\"";
+            } else {
+                start.FileName = System.IO.Path.Combine (Environment.GetFolderPath (Environment.SpecialFolder.System), "WindowsPowerShell\\v1.0\\powershell.exe");
+                start.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + System.IO.Path.Combine (root, "speech-local.ps1") + "\" -JobPath \"" + jobPath + "\"";
+            }
+            if (createHelper != null) start = createHelper (jobPath, online);
+            using (Process process = Process.Start (start)) {
+                if (process == null) throw new InvalidOperationException ("无法启动语音生成进程。");
+                using (ProcessJob.AttachOrTerminate (process))
+                using (ct.Register (delegate { Terminate (process); })) {
+                    Task<string> errors = process.StandardError.ReadToEndAsync ();
+                    int expected = 0;
+                    while (true) {
+                        Task<string> line = process.StandardOutput.ReadLineAsync ();
+                        if (await Task.WhenAny (line, Task.Delay (25000, ct)) != line) {
+                            ct.ThrowIfCancellationRequested ();
+                            throw new TimeoutException ("语音生成超时，请检查网络或切换本机语音。");
+                        }
+                        string message = await line;
+                        ct.ThrowIfCancellationRequested ();
+                        if (message == null) break;
+                        int index;
+                        if (!message.StartsWith ("READY ", StringComparison.Ordinal) ||
+                            !int.TryParse (message.Substring (6), out index) || index != expected || index >= chunks.Length)
+                            throw new InvalidOperationException ("语音生成组件返回了无效结果。");
+                        string audio = System.IO.Path.Combine (requestFolder, index + (online ? ".mp3" : ".wav"));
+                        if (!File.Exists (audio) || new FileInfo (audio).Length < 100)
+                            throw new InvalidOperationException ("未能生成完整音频。");
+                        if (ticket != revision) return;
+                        expected++;
+                        ready.Enqueue (audio);
+                        if (player == null && !paused) PlayNext (ticket);
+                    }
+                    if (!await Task.Run (() => process.WaitForExit (5000))) {
+                        Terminate (process);
+                        throw new TimeoutException ("语音生成组件未正常退出。");
+                    }
+                    await errors;
+                    ct.ThrowIfCancellationRequested ();
+                    if (process.ExitCode != 0 || expected != chunks.Length)
+                        throw new InvalidOperationException (online ?
+                            "在线语音暂时不可用，请检查网络或切换本机语音。" :
+                            "本机未能生成该音色，请切换在线自然语音或安装对应语言包。");
+                }
+            }
+            if (ticket == revision) {
+                generated = true;
+                if (player == null && ready.Count == 0 && !paused) Stop ();
+            }
+        } catch (OperationCanceledException) {
+        } catch (Exception ex) {
+            if (ticket == revision) {
+                Stop ();
+                if (Failed != null) Failed (ex.Message);
+            }
+        } finally {
+            DeleteFile (jobPath);
+            if (ticket != revision) DeleteFolder (requestFolder);
+            if (pending == cancel) pending = null;
+            cancel.Dispose ();
+        }
+    }
 
-	internal TimeSpan Position {
-		get {
-			if (player != null) {
-				if (!(State == "paused")) {
-					return player.Position;
-				}
-				return pausedPosition;
-			}
-			return TimeSpan.Zero;
-		}
-	}
+    private void PlayNext (int ticket)
+    {
+        if (ticket != revision || paused) return;
+        if (ready.Count == 0) {
+            if (generated) Stop ();
+            else SetState ("loading");
+            return;
+        }
+        MediaPlayer current = new MediaPlayer { Volume = volume };
+        player = current;
+        audioPath = ready.Dequeue ();
+        current.MediaOpened += delegate {
+            if (ticket != revision || player != current) return;
+            if (paused) SetState ("paused");
+            else { current.Play (); SetState ("playing"); }
+        };
+        current.MediaEnded += delegate {
+            if (ticket != revision || player != current) return;
+            if (current.NaturalDuration.HasTimeSpan) completedPosition += current.NaturalDuration.TimeSpan;
+            current.Close ();
+            player = null;
+            DeleteFile (audioPath);
+            audioPath = null;
+            pausedPosition = TimeSpan.Zero;
+            if (!paused) PlayNext (ticket);
+        };
+        current.MediaFailed += delegate(object sender, ExceptionEventArgs e) {
+            if (ticket != revision || player != current) return;
+            Stop ();
+            if (Failed != null) Failed ("音频播放失败：" + e.ErrorException.Message);
+        };
+        current.Open (new Uri (audioPath));
+    }
 
-	public event Action Changed;
+    public void TogglePause ()
+    {
+        if (State == "playing" || State == "loading") {
+            paused = true;
+            if (player != null) { player.Pause (); pausedPosition = player.Position; }
+            SetState ("paused");
+        } else if (State == "paused") {
+            paused = false;
+            if (player != null) { player.Position = pausedPosition; player.Play (); SetState ("playing"); }
+            else PlayNext (revision);
+        }
+    }
 
-	public event Action<string> Failed;
+    public void Stop ()
+    {
+        revision++;
+        paused = false;
+        generated = false;
+        pausedPosition = completedPosition = TimeSpan.Zero;
+        if (pending != null) { pending.Cancel (); pending = null; }
+        if (player != null) { player.Close (); player = null; }
+        ready.Clear ();
+        audioPath = null;
+        string previous = folder;
+        folder = null;
+        DeleteFolder (previous);
+        SetState ("idle");
+    }
 
-	public SpeechPlayer (double volume = 1.0)
-	{
-		this.volume = volume;
-		State = "idle";
-	}
+    private static void Terminate (Process process)
+    {
+        try { if (!process.HasExited) process.Kill (); } catch (InvalidOperationException) {} catch (Win32Exception) {}
+    }
 
-	private void SetState (string state)
-	{
-		State = state;
-		if (this.Changed != null) {
-			this.Changed ();
-		}
-	}
+    private static void DeleteFile (string path)
+    {
+        try { if (path != null) File.Delete (path); } catch (IOException) {} catch (UnauthorizedAccessException) {}
+    }
 
-	public static string Voice (string language, string gender)
-	{
-		bool flag = gender == "male";
-		switch (language) {
-		case "EN-US":
-			if (!flag) {
-				return "en-US-JennyNeural";
-			}
-			return "en-US-GuyNeural";
-		case "JA":
-			if (!flag) {
-				return "ja-JP-NanamiNeural";
-			}
-			return "ja-JP-KeitaNeural";
-		case "KO":
-			if (!flag) {
-				return "ko-KR-SunHiNeural";
-			}
-			return "ko-KR-InJoonNeural";
-		default:
-			if (!flag) {
-				return "zh-CN-XiaoxiaoNeural";
-			}
-			return "zh-CN-YunxiNeural";
-		}
-	}
+    private static void DeleteFolder (string path)
+    {
+        if (path == null) return;
+        string parent = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "YikeSpeech");
+        Guid id;
+        if (!string.Equals (System.IO.Path.GetDirectoryName (path), parent, StringComparison.OrdinalIgnoreCase) ||
+            !Guid.TryParseExact (System.IO.Path.GetFileName (path), "N", out id)) return;
+        try { Directory.Delete (path, true); } catch (IOException) {} catch (UnauthorizedAccessException) {}
+    }
 
-	public async Task Speak (string text, string language, string gender, int rate, bool online)
-	{
-		Stop ();
-		int ticket = revision;
-		CancellationTokenSource cancel = (pending = new CancellationTokenSource ());
-		CancellationToken ct = cancel.Token;
-		string folder = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "YikeSpeech");
-		Directory.CreateDirectory (folder);
-		string stem = System.IO.Path.Combine (folder, Guid.NewGuid ().ToString ("N"));
-		string jobPath = stem + ".json";
-		string outputPath = stem + (online ? ".mp3" : ".wav");
-		bool retained = false;
-		try {
-			File.WriteAllText (jobPath, Store.Json.Serialize (new {
-				text = text,
-				voice = Voice (language, gender),
-				language = language,
-				gender = gender,
-				rate = Math.Max (-50, Math.Min (50, rate * 5)),
-				output = outputPath,
-				proxy = (online ? ProxySettings.Current : null)
-			}));
-			SetState ("loading");
-			string root = AppDomain.CurrentDomain.BaseDirectory;
-			ProcessStartInfo start = new ProcessStartInfo {
-				UseShellExecute = false,
-				CreateNoWindow = true,
-				RedirectStandardError = true
-			};
-			if (online) {
-				start.FileName = System.IO.Path.Combine (root, "speech-runtime", "python.exe");
-				start.Arguments = "\"" + System.IO.Path.Combine (root, "speech-online.py") + "\" \"" + jobPath + "\"";
-			} else {
-				start.FileName = System.IO.Path.Combine (Environment.GetFolderPath (Environment.SpecialFolder.System), "WindowsPowerShell\\v1.0\\powershell.exe");
-				start.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + System.IO.Path.Combine (root, "speech-local.ps1") + "\" -JobPath \"" + jobPath + "\"";
-			}
-			Process process = Process.Start (start);
-			try {
-				if (process == null) {
-					throw new InvalidOperationException ("无法启动语音生成进程。");
-				}
-				using (ProcessJob.AttachOrTerminate (process)) {
-					Task<string> errors = process.StandardError.ReadToEndAsync ();
-					using (ct.Register (delegate {
-						try {
-							if (!process.HasExited) {
-								process.Kill ();
-							}
-						} catch {
-						}
-					})) {
-						if (!(await Task.Run (() => process.WaitForExit (65000)))) {
-							try {
-								process.Kill ();
-							} catch {
-							}
-							throw new TimeoutException ("语音生成超时，请检查网络或切换本机语音。");
-						}
-						ct.ThrowIfCancellationRequested ();
-						await errors;
-						if (process.ExitCode != 0 || !File.Exists (outputPath) || new FileInfo (outputPath).Length < 100) {
-							throw new InvalidOperationException (online ? "在线语音暂时不可用，请检查网络或切换本机语音。" : "本机未能生成该音色，请切换在线自然语音或安装对应语言包。");
-						}
-					}
-				}
-			} finally {
-				if (process != null) {
-					((IDisposable)process).Dispose ();
-				}
-			}
-			if (ticket != revision) {
-				return;
-			}
-			MediaPlayer current = new MediaPlayer {
-				Volume = volume
-			};
-			player = current;
-			audioPath = outputPath;
-			retained = true;
-			current.MediaOpened += delegate {
-				if (ticket == revision) {
-					current.Play ();
-					SetState ("playing");
-				}
-			};
-			current.MediaEnded += delegate {
-				if (ticket == revision) {
-					Stop ();
-				}
-			};
-			current.MediaFailed += delegate(object s, ExceptionEventArgs e) {
-				if (ticket == revision) {
-					Stop ();
-					if (this.Failed != null) {
-						this.Failed ("音频播放失败：" + e.ErrorException.Message);
-					}
-				}
-			};
-			current.Open (new Uri (outputPath));
-		} catch (OperationCanceledException) {
-		} catch (Exception ex2) {
-			if (ticket == revision) {
-				Stop ();
-				if (this.Failed != null) {
-					this.Failed (ex2.Message);
-				}
-			}
-		} finally {
-			try {
-				File.Delete (jobPath);
-				if (!retained) {
-					File.Delete (outputPath);
-				}
-			} catch {
-			}
-			if (pending == cancel) {
-				pending = null;
-			}
-			cancel.Dispose ();
-		}
-	}
-
-	public void TogglePause ()
-	{
-		if (player != null) {
-			if (State == "playing") {
-				player.Pause ();
-				pausedPosition = player.Position;
-				SetState ("paused");
-			} else if (State == "paused") {
-				player.Position = pausedPosition;
-				player.Play ();
-				SetState ("playing");
-			}
-		}
-	}
-
-	public void Stop ()
-	{
-		revision++;
-		pausedPosition = TimeSpan.Zero;
-		if (pending != null) {
-			pending.Cancel ();
-			pending = null;
-		}
-		if (player != null) {
-			player.Close ();
-			player = null;
-		}
-		if (audioPath != null) {
-			try {
-				File.Delete (audioPath);
-			} catch {
-			}
-			audioPath = null;
-		}
-		SetState ("idle");
-	}
-
-	public void Dispose ()
-	{
-		Stop ();
-	}
+    public void Dispose () { Stop (); }
 }
-
 }

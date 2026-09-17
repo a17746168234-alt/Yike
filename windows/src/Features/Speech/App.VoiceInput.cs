@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -39,6 +39,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 namespace WindowsTranslator {
 public partial class App {
+private bool voiceReady;
 private void PostVoiceEvent (Action action)
 {
 	int generation = voiceInput.Revision;
@@ -68,6 +69,10 @@ private void BindVoiceInput ()
 	voiceInput.AudioLevelChanged += delegate(int level) {
 		PostVoiceEvent (delegate {
 			if (voiceWaveform != null && voiceInput.IsListening) {
+				if (!voiceReady) {
+					voiceReady = true;
+					Status ("正在监听麦克风 · 识别结果实时写入");
+				}
 				voiceWaveform.Update (level);
 			}
 		});
@@ -239,6 +244,7 @@ private void StopVoiceInput (string message)
 private bool StartApplicationVoice (string tooltip)
 {
 	BeginVoiceDraft ();
+	voiceReady = false;
 	if (!voiceInput.Start (Code (source))) {
 		voiceDraft.Cancel ();
 		ResetVoiceIndicator ();

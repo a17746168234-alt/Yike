@@ -1,4 +1,4 @@
-﻿param([string]$JobPath)
+param([string]$JobPath)
 $ErrorActionPreference='Stop'
 try {
  $job=Get-Content -LiteralPath $JobPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -13,10 +13,19 @@ try {
  $synth=New-Object Windows.Media.SpeechSynthesis.SpeechSynthesizer
  $synth.Voice=$voice
  $synth.Options.SpeakingRate=1.0+$job.rate/100.0
- $audio=Await ($synth.SynthesizeTextToStreamAsync($job.text)) ([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])
- $reader=New-Object Windows.Storage.Streams.DataReader($audio)
- $null=Await ($reader.LoadAsync([uint32]$audio.Size)) ([uint32])
- $bytes=New-Object byte[] ([int]$audio.Size);$reader.ReadBytes($bytes)
- [IO.File]::WriteAllBytes($job.output,$bytes)
- $reader.Dispose();$audio.Dispose();$synth.Dispose()
+ $texts=if($job.PSObject.Properties.Name -contains 'chunks'){@($job.chunks)}else{@($job.text)}
+ try {
+  for($index=0;$index -lt $texts.Count;$index++) {
+   $audio=Await ($synth.SynthesizeTextToStreamAsync($texts[$index])) ([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])
+   $reader=$null
+   try {
+    $reader=New-Object Windows.Storage.Streams.DataReader($audio)
+    $null=Await ($reader.LoadAsync([uint32]$audio.Size)) ([uint32])
+    $bytes=New-Object byte[] ([int]$audio.Size);$reader.ReadBytes($bytes)
+    $output=if($job.folder){Join-Path $job.folder ($index.ToString()+'.wav')}else{$job.output}
+    [IO.File]::WriteAllBytes($output,$bytes)
+   } finally { if($reader){$reader.Dispose()};$audio.Dispose() }
+   if($job.folder){[Console]::Out.WriteLine('READY '+$index);[Console]::Out.Flush()}
+  }
+ } finally {$synth.Dispose()}
 } catch { [Console]::Error.WriteLine($_.Exception.Message);exit 1 }
