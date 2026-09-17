@@ -1,0 +1,45 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="划词翻译 · Yike" Width="560" Height="500" MinWidth="440" MinHeight="390" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Foreground="{DynamicResource InkBrush}" FontFamily="Microsoft YaHei UI" FontSize="13" ResizeMode="CanResizeWithGrip" Topmost="True" WindowStartupLocation="CenterScreen">
+ <Window.Resources>
+  <LinearGradientBrush x:Key="PopupAccent" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#756CFF" Offset="0"/><GradientStop Color="#4D7CFE" Offset="1"/></LinearGradientBrush>
+  <Style x:Key="TrafficButton" TargetType="Button"><Setter Property="Width" Value="14"/><Setter Property="Height" Value="14"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="Padding" Value="0"/><Setter Property="BorderBrush" Value="#40FFFFFF"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7"/></ControlTemplate></Setter.Value></Setter></Style>
+  <Style x:Key="PopupText" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}"><Setter Property="IsReadOnly" Value="True"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/><Setter Property="VerticalScrollBarVisibility" Value="Auto"/><Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/><Setter Property="Background" Value="Transparent"/><Setter Property="SelectionBrush" Value="#80756CFF"/></Style>
+ </Window.Resources>
+ <Grid>
+  <Border Margin="14" CornerRadius="26" Background="{DynamicResource BackdropBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
+   <Border.Effect><DropShadowEffect BlurRadius="30" ShadowDepth="7" Opacity="0.24" Color="#25324A"/></Border.Effect>
+   <Grid>
+    <Grid.RowDefinitions><RowDefinition Height="82"/><RowDefinition Height="*"/><RowDefinition Height="70"/></Grid.RowDefinitions>
+    <Grid x:Name="DragHeader" Background="Transparent" Margin="18,0,18,0">
+     <Grid.ColumnDefinitions><ColumnDefinition Width="78"/><ColumnDefinition Width="54"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+     <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="ClosePopup" Style="{StaticResource TrafficButton}" Background="#FF5F57" ToolTip="关闭 (Esc)"/><Button x:Name="MinimizePopup" Style="{StaticResource TrafficButton}" Background="#FFBD2E" ToolTip="最小化"/><Button x:Name="MaximizePopup" Style="{StaticResource TrafficButton}" Background="#28C840" ToolTip="最大化 / 还原"/></StackPanel>
+     <Border Grid.Column="1" Width="44" Height="44" CornerRadius="15" Background="{StaticResource PopupAccent}" HorizontalAlignment="Left" VerticalAlignment="Center">
+      <Border.Effect><DropShadowEffect BlurRadius="14" ShadowDepth="3" Opacity="0.28" Color="#4D55D8"/></Border.Effect>
+      <TextBlock Text="译" FontSize="22" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+     </Border>
+     <StackPanel Grid.Column="2" VerticalAlignment="Center"><TextBlock Text="划词翻译" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="选中文字，即刻抵达另一种语言" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,0"/></StackPanel>
+     <Button x:Name="Pin" Grid.Column="3" Content="已置顶" ToolTip="切换窗口置顶" Padding="12,8" FontSize="12" VerticalAlignment="Center"/>
+    </Grid>
+    <Grid Grid.Row="1" Margin="22,0">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="14"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <Border Background="{DynamicResource ControlBrush}" CornerRadius="15" Padding="16,14">
+      <StackPanel><TextBlock x:Name="OriginalLanguage" Text="原文 · 自动检测" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,0,0,8"/><TextBox x:Name="Original" Style="{StaticResource PopupText}" FontSize="14" MaxHeight="82"/></StackPanel>
+     </Border>
+     <Border Grid.Row="2" Background="{DynamicResource SurfaceBrush}" CornerRadius="18" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" Padding="18,16">
+      <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.08"/></Border.Effect>
+      <Grid>
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="译为" FontSize="11" Foreground="#625BF6" FontWeight="SemiBold" VerticalAlignment="Center"/><ComboBox x:Name="PopupTargetLanguage" Grid.Column="1" Width="142" Height="32" Margin="10,0,0,0" HorizontalAlignment="Left" FontSize="12"/><TextBlock x:Name="Language" Visibility="Collapsed"/><Border Grid.Column="2" Background="{DynamicResource SoftAccentBrush}" CornerRadius="9" Padding="10,5"><TextBlock x:Name="State" Text="正在翻译…" FontSize="11" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/></Border></Grid>
+       <TextBox x:Name="Translation" Grid.Row="1" Style="{StaticResource PopupText}" FontSize="18"/>
+       <ProgressBar x:Name="Loading" Grid.Row="2" Height="3" Margin="0,14,0,0" IsIndeterminate="True" Foreground="#625BF6" Background="{DynamicResource ControlBrush}" BorderThickness="0"/>
+      </Grid>
+     </Border>
+    </Grid>
+    <Grid Grid.Row="2" Margin="24,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+     <ContentControl x:Name="TextZoom" VerticalAlignment="Center"/>
+     <Button x:Name="OpenMain" Grid.Column="1" Content="打开主窗口" Padding="14,9" Margin="0,0,9,0" VerticalAlignment="Center"/>
+     <Button x:Name="Copy" Grid.Column="2" Content="复制译文" Background="{StaticResource PopupAccent}" Foreground="White" BorderThickness="0" Padding="18,10" IsEnabled="False" VerticalAlignment="Center"><Button.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity="0.24" Color="#4D55D8"/></Button.Effect></Button>
+    </Grid>
+   </Grid>
+  </Border>
+ </Grid>
+</Window>
