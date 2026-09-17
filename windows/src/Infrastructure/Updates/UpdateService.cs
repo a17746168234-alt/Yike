@@ -36,14 +36,14 @@ internal sealed class UpdateService {
 				Uri uri;
 				if (!Uri.TryCreate(File.ReadAllText(customSource).Trim(), UriKind.Absolute, out uri) || uri.Scheme != "https")
 					return UpdateCheckResult.Failed(currentVersion, "更新源必须使用 HTTPS 地址");
-				string manifest = await fetch(uri, token);
+				string manifest = await fetch(uri, token).ConfigureAwait(false);
 				token.ThrowIfCancellationRequested();
 				return Parse(manifest, currentVersion);
 			}
 			// Bundled metadata describes this installer, never the latest online release.
 			UpdateCheckResult newest = null;
 			for (int page = 1; page <= 5; page++) {
-				string json = await fetch(new Uri(ApiUrl + "&page=" + page), token);
+				string json = await fetch(new Uri(ApiUrl + "&page=" + page), token).ConfigureAwait(false);
 				token.ThrowIfCancellationRequested();
 				UpdateCheckResult candidate = ParseGitHubReleases(json, currentVersion);
 				if (candidate.Success && (newest == null || candidate.LatestVersion > newest.LatestVersion)) newest = candidate;
@@ -60,21 +60,21 @@ internal sealed class UpdateService {
 
 	private async Task<string> FetchAsync(Uri uri, CancellationToken token) {
 		string proxy = ProxySettings.Current;
-		try { return await FetchViaAsync(uri, proxy, token); }
+		try { return await FetchViaAsync(uri, proxy, token).ConfigureAwait(false); }
 		catch (Exception) {
 			token.ThrowIfCancellationRequested();
 			if (proxy == null) throw;
 		}
-		return await FetchViaAsync(uri, null, token);
+		return await FetchViaAsync(uri, null, token).ConfigureAwait(false);
 	}
 
 	private async Task<string> FetchViaAsync(Uri uri, string proxy, CancellationToken token) {
 		using (HttpClient client = NewClient(proxy)) {
 			client.MaxResponseContentBufferSize = MaximumFeedBytes;
-			using (HttpResponseMessage response = await client.GetAsync(uri, token)) {
+			using (HttpResponseMessage response = await client.GetAsync(uri, token).ConfigureAwait(false)) {
 				if (response.RequestMessage.RequestUri.Scheme != "https") throw new InvalidDataException();
 				response.EnsureSuccessStatusCode();
-				string json = await response.Content.ReadAsStringAsync();
+				string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 				if (json.Length > MaximumFeedBytes) throw new InvalidDataException();
 				return json;
 			}
@@ -145,18 +145,18 @@ internal sealed class UpdateService {
 				client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/octet-stream");
 				using (CancellationTokenSource activity = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token)) {
 				activity.CancelAfter(TimeSpan.FromSeconds(60));
-				using (HttpResponseMessage response = await client.GetAsync(release.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, activity.Token)) {
+				using (HttpResponseMessage response = await client.GetAsync(release.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, activity.Token).ConfigureAwait(false)) {
 					response.EnsureSuccessStatusCode();
 					if (response.RequestMessage.RequestUri.Scheme != "https") throw new InvalidDataException("安装包重定向到了不安全地址。");
-					using (Stream input = await response.Content.ReadAsStreamAsync())
+					using (Stream input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
 					using (FileStream output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
 					using (SHA256 hash = SHA256.Create()) {
 						byte[] buffer = new byte[81920]; long received = 0; int count;
-						while ((count = await input.ReadAsync(buffer, 0, buffer.Length, activity.Token)) > 0) {
+						while ((count = await input.ReadAsync(buffer, 0, buffer.Length, activity.Token).ConfigureAwait(false)) > 0) {
 							activity.CancelAfter(TimeSpan.FromSeconds(60));
 							received += count;
 							if (received > release.Size) throw new InvalidDataException("安装包大小与发布信息不一致。");
-							await output.WriteAsync(buffer, 0, count, deadline.Token);
+							await output.WriteAsync(buffer, 0, count, deadline.Token).ConfigureAwait(false);
 							hash.TransformBlock(buffer, 0, count, buffer, 0);
 							if (progress != null) progress.Report((int)(received * 100 / release.Size));
 						}

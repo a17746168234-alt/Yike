@@ -50,8 +50,25 @@ internal static class UpdateTests {
 			UpdateService pages = new UpdateService(root + "-missing", old, delegate(Uri uri, CancellationToken token) { return Task.FromResult(uri.Query.Contains("page=2") ? json : Store.Json.Serialize(many)); });
 			Check(pages.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().UpdateAvailable, "Windows release on second page was lost");
 			DownloadTests(old);
+			CheckWithoutUiDispatcher(json, old);
 		} finally { Directory.Delete(root, true); }
-		lines.Add("PASS: GitHub Windows-only stable releases; latest semantic version; pagination; stale local feed ignored; offline/cancel never report latest; installer SHA-256 and size; failed/cancelled download cleanup; HTTPS custom feed retained");
+		lines.Add("PASS: GitHub Windows-only stable releases; latest semantic version; pagination; stale local feed ignored; offline/cancel never report latest; installer SHA-256 and size; failed/cancelled download cleanup; HTTPS custom feed retained; asynchronous updates do not depend on a UI dispatcher");
+	}
+	private static void CheckWithoutUiDispatcher(string json, Version old) {
+		Task check = Task.Run(delegate {
+			SynchronizationContext previous = SynchronizationContext.Current;
+			SynchronizationContext.SetSynchronizationContext(new NonPumpingContext());
+			try {
+				UpdateService service = new UpdateService(baseDirectory: Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")), currentVersion: old,
+					fetch: delegate { return Task.Run(async delegate { await Task.Delay(50); return json; }); });
+				Check(service.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().UpdateAvailable, "asynchronous update check requires UI dispatcher");
+				DownloadTests(old);
+			} finally { SynchronizationContext.SetSynchronizationContext(previous); }
+		});
+		Check(check.Wait(5000), "asynchronous update service blocked waiting for UI dispatcher");
+	}
+	private sealed class NonPumpingContext : SynchronizationContext {
+		public override void Post(SendOrPostCallback callback, object state) { }
 	}
 	private static void DownloadTests(Version old) {
 		byte[] bytes = { 1, 2, 3 }; string digest;
@@ -81,7 +98,10 @@ internal static class UpdateTests {
 		public BytesHandler(byte[] data) { this.data=data; }
 		protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) {
 			token.ThrowIfCancellationRequested();
-			return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage=request, Content=new ByteArrayContent(data) });
+			return Task.Run(async delegate {
+				await Task.Delay(20, token);
+				return new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage=request, Content=new ByteArrayContent(data) };
+			}, token);
 		}
 	}
 	public static void Live(bool download) {
