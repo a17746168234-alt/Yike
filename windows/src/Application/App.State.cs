@@ -90,6 +90,9 @@ private SpeechInput voiceInput = new SpeechInput ();
 private readonly AccountStore accounts = new AccountStore ();
 
 
+private RemoteAccountSession remoteSession = RemoteAccountSessionStore.Load ();
+
+
 private BitmapSource defaultAppIcon;
 
 

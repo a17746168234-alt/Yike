@@ -186,6 +186,14 @@ private void Start (System.Windows.Application app, string[] args)
 	};
 	ApplyAppearance ();
 	window.Show ();
+	if (!previewMode) {
+		if (remoteSession != null) {
+			RefreshRemoteAccount ();
+		} else if (string.IsNullOrWhiteSpace (Store.Key)) {
+			ShowSettings (false, "account");
+			Status ("请注册或登录 Yike 账号后使用公共翻译。");
+		}
+	}
 	SchedulePreview (args);
 }
 

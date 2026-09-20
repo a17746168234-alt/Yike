@@ -10,7 +10,7 @@
         Background="Transparent"
         Foreground="{DynamicResource InkBrush}">
  <shell:WindowChrome.WindowChrome>
-  <shell:WindowChrome CaptionHeight="32" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="32" UseAeroCaptionButtons="False"/>
+  <shell:WindowChrome CaptionHeight="48" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="32" UseAeroCaptionButtons="False"/>
  </shell:WindowChrome.WindowChrome>
  <Window.Resources>
   <SolidColorBrush x:Key="WindowBrush" Color="#F3F6FC"/>
@@ -190,7 +190,7 @@
 
  <Border x:Name="MainWindowFrame" CornerRadius="32" Background="{DynamicResource WindowBrush}" ClipToBounds="True">
  <Grid ClipToBounds="True">
-  <Grid.RowDefinitions><RowDefinition Height="32"/><RowDefinition Height="80"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
+  <Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition Height="80"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
   <Border Grid.RowSpan="4" Style="{StaticResource BackdropStyle}" IsHitTestVisible="False"/>
   <Grid Grid.RowSpan="4" IsHitTestVisible="False" Opacity="0.42">
    <Ellipse Width="680" Height="460" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-290,-280,0,0">
@@ -202,10 +202,10 @@
   </Grid>
 
   <Border x:Name="CustomTitleBar" Grid.Row="0" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Background="#08000000">
-   <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-    <Button x:Name="MinimizeWindowButton" Width="46" Height="32" Padding="0" ToolTip="最小化"><TextBlock Text="&#xE921;" FontFamily="Segoe Fluent Icons" FontSize="11"/></Button>
-    <Button x:Name="MaximizeWindowButton" Width="46" Height="32" Padding="0" ToolTip="最大化"><TextBlock Text="&#xE922;" FontFamily="Segoe Fluent Icons" FontSize="11"/></Button>
-    <Button x:Name="CloseWindowButton" Width="46" Height="32" Padding="0" ToolTip="关闭"><TextBlock Text="&#xE8BB;" FontFamily="Segoe Fluent Icons" FontSize="11"/></Button>
+   <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="17,0,0,0" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+    <Button x:Name="CloseWindowButton" Width="14" Height="14" Margin="0,0,8,0" Padding="0" Background="#FF5F57" BorderBrush="#40FFFFFF" BorderThickness="1" ToolTip="关闭" Tag="main-traffic-close" Cursor="Hand"/>
+    <Button x:Name="MinimizeWindowButton" Width="14" Height="14" Margin="0,0,8,0" Padding="0" Background="#FFBD2E" BorderBrush="#40FFFFFF" BorderThickness="1" ToolTip="最小化" Tag="main-traffic-minimize" Cursor="Hand"/>
+    <Button x:Name="MaximizeWindowButton" Width="14" Height="14" Margin="0,0,8,0" Padding="0" Background="#28C840" BorderBrush="#40FFFFFF" BorderThickness="1" ToolTip="最大化 / 还原" Tag="main-traffic-maximize" Cursor="Hand"/>
    </StackPanel>
   </Border>
 

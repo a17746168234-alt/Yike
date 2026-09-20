@@ -94,6 +94,59 @@ public static partial class Tests
 		}
 	}
 
+	private sealed class YikeApiFake : HttpMessageHandler
+	{
+		public readonly List<string> Paths = new List<string> ();
+
+		public string Authorization;
+
+		public bool RejectLogin;
+
+		public string TranslateErrorCode;
+
+		public int TranslateCalls;
+
+		protected override async Task<HttpResponseMessage> SendAsync (HttpRequestMessage request, CancellationToken ct)
+		{
+			ct.ThrowIfCancellationRequested ();
+			string path = request.RequestUri.AbsolutePath;
+			Paths.Add (path);
+			Authorization = request.Headers.Contains ("Authorization") ? request.Headers.GetValues ("Authorization").First () : null;
+			Dictionary<string, object> body = new Dictionary<string, object> ();
+			if (request.Content != null) body = Store.Json.Deserialize<Dictionary<string, object>> (await request.Content.ReadAsStringAsync ());
+			if (RejectLogin && path.EndsWith ("/v2/login")) {
+				return JsonResponse (HttpStatusCode.Unauthorized, new { code = "invalid_credentials", message = "邮箱或密码不正确。" });
+			}
+			if (path.EndsWith ("/v2/login")) return JsonResponse (HttpStatusCode.OK, new { token = "token-login", account = Account (199900) });
+			if (path.EndsWith ("/v2/register/send")) return JsonResponse (HttpStatusCode.OK, new { challenge_id = "challenge-1", message = "验证码已发送" });
+			if (path.EndsWith ("/v2/register/verify")) return JsonResponse (HttpStatusCode.OK, new { token = "token-register", account = Account (200000) });
+			if (path.EndsWith ("/v1/me")) return JsonResponse (HttpStatusCode.OK, new { account = Account (199800) });
+			if (path.EndsWith ("/v1/logout")) return JsonResponse (HttpStatusCode.OK, new { message = "已退出" });
+			if (path.EndsWith ("/v1/translate")) {
+				TranslateCalls++;
+				if (!string.IsNullOrWhiteSpace (TranslateErrorCode)) {
+					return JsonResponse ((HttpStatusCode)429, new { code = TranslateErrorCode, message = "公共额度暂时不可用" });
+				}
+				ArrayList values = (ArrayList)body ["text"];
+				return JsonResponse (HttpStatusCode.OK, new {
+					translations = values.Cast<string> ().Select (value => "公：" + value).ToArray (),
+					account = Account (199700)
+				});
+			}
+			return JsonResponse (HttpStatusCode.NotFound, new { code = "not_found", message = "不存在" });
+		}
+
+		private static object Account (long remaining)
+		{
+			return new { email = "user@example.com", username = "user@example.com", granted = 200000, used = 200000 - remaining, remaining = remaining };
+		}
+
+		private static HttpResponseMessage JsonResponse (HttpStatusCode status, object value)
+		{
+			return new HttpResponseMessage (status) { Content = new StringContent (Store.Json.Serialize (value), Encoding.UTF8, "application/json") };
+		}
+	}
+
 	private sealed class FakeSpeechBackend : ISpeechInputBackend, IDisposable
 	{
 		public bool Disposed;
@@ -208,6 +261,64 @@ public static partial class Tests
 			} catch {
 			}
 		}
+	}
+
+	internal static void RunRemoteAccountTests (List<string> lines)
+	{
+		YikeApiFake fake = new YikeApiFake ();
+		using (YikeAccountClient client = new YikeAccountClient (fake)) {
+			RemoteAccountSession session = client.Login ("USER@example.com", "Password123", CancellationToken.None).GetAwaiter ().GetResult ();
+			Check (session.Token == "token-login" && session.Email == "user@example.com" && session.Remaining == 199900, "remote login result was not parsed");
+			YikeRegistrationChallenge challenge = client.SendRegistration ("new@example.com", "Password123", CancellationToken.None).GetAwaiter ().GetResult ();
+			Check (challenge.Id == "challenge-1", "registration challenge was not parsed");
+			RemoteAccountSession registered = client.VerifyRegistration ("new@example.com", challenge.Id, "123456", CancellationToken.None).GetAwaiter ().GetResult ();
+			Check (registered.Token == "token-register" && registered.Remaining == 200000, "verified registration did not create a session");
+			client.Refresh (session, CancellationToken.None).GetAwaiter ().GetResult ();
+			Check (session.Remaining == 199800 && fake.Authorization == "Bearer token-login", "account refresh did not authenticate or update quota");
+			List<int> progress = new List<int> ();
+			List<string> texts = Enumerable.Range (0, 45).Select (i => "line" + i).ToList ();
+			List<string> translated = client.TranslateProgressive (session, texts, "EN-US", "ZH-HANS", (i, value) => progress.Add (i), CancellationToken.None).GetAwaiter ().GetResult ();
+			Check (translated.Count == 45 && translated [44] == "公：line44" && progress.SequenceEqual (Enumerable.Range (0, 45)) && fake.Paths.Count (p => p.EndsWith ("/v1/translate")) == 2, "public translation batching or progress failed");
+			Check (session.Remaining == 199700 && YikeAccountClient.PublicLanguage ("ZH-HANS", false) == "zh-CN", "public translation did not refresh quota or map language");
+		}
+		YikeApiFake rejected = new YikeApiFake { RejectLogin = true };
+		bool actionable = false;
+		try {
+			using (YikeAccountClient client = new YikeAccountClient (rejected)) client.Login ("user@example.com", "WrongPass123", CancellationToken.None).GetAwaiter ().GetResult ();
+		} catch (YikeApiException ex) { actionable = ex.StatusCode == 401 && ex.ErrorCode == "invalid_credentials" && ex.Message.Contains ("不正确"); }
+		Check (actionable, "remote account API error was not preserved");
+		lines.Add ("PASS: remote email registration/login, bearer sessions, quota refresh, public translation batching, language mapping and actionable API errors");
+	}
+
+	internal static void RunTranslationRouterTests (List<string> lines)
+	{
+		RemoteAccountSession session = new RemoteAccountSession { Token = "token", Email = "user@example.com", Granted = 200000, Remaining = 200000 };
+		YikeApiFake publicFirst = new YikeApiFake ();
+		Fake unusedPersonal = new Fake ();
+		TranslationRouter router = new TranslationRouter ("personal:fx", () => new YikeAccountClient (publicFirst), key => new DeepL (key, unusedPersonal));
+		TranslationExecutionResult result = router.TranslateProgressive (session, new string[1] { "hello" }, "EN-US", "EN-US", "ZH-HANS", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
+		Check (result.UsedPublicQuota && !result.UsedPersonalFallback && result.EngineName == "Yike 公共 DeepL" && publicFirst.TranslateCalls == 1 && unusedPersonal.Calls == 0, "configured personal key did not keep public quota first");
+
+		YikeApiFake emptyPool = new YikeApiFake { TranslateErrorCode = "pool_empty" };
+		Fake fallbackPersonal = new Fake ();
+		router = new TranslationRouter ("personal:fx", () => new YikeAccountClient (emptyPool), key => new DeepL (key, fallbackPersonal));
+		result = router.TranslateProgressive (session, new string[1] { "hello" }, "EN-US", "EN-US", "ZH-HANS", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
+		Check (result.UsedPersonalFallback && result.EngineName.Contains ("后备") && emptyPool.TranslateCalls == 1 && fallbackPersonal.Calls == 1, "empty public quota did not safely fall back to personal key");
+
+		YikeApiFake uncertain = new YikeApiFake { TranslateErrorCode = "request_processed" };
+		Fake blockedPersonal = new Fake ();
+		bool blocked = false;
+		try {
+			router = new TranslationRouter ("personal:fx", () => new YikeAccountClient (uncertain), key => new DeepL (key, blockedPersonal));
+			router.TranslateProgressive (session, new string[1] { "hello" }, "EN-US", "EN-US", "ZH-HANS", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
+		} catch (YikeApiException ex) { blocked = ex.ErrorCode == "request_processed"; }
+		Check (blocked && blockedPersonal.Calls == 0, "uncertain public request was duplicated through personal key");
+
+		Fake unsupportedPersonal = new Fake ();
+		router = new TranslationRouter ("personal:fx", () => { throw new Exception ("public client should not be created"); }, key => new DeepL (key, unsupportedPersonal));
+		result = router.TranslateProgressive (session, new string[1] { "bonjour" }, "FR", "FR", "DE", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
+		Check (!result.UsedPublicQuota && unsupportedPersonal.Calls == 1, "unsupported public language did not use the personal key");
+		lines.Add ("PASS: translation routing prefers each user's 200k public quota, safely falls back to a personal key, and never duplicates uncertain public requests");
 	}
 
 	public static async Task SpeechIntegration ()
@@ -508,6 +619,8 @@ public static partial class Tests
 			RunSingleTranslationTests (list);
 			RunSpeechRegressionTests (list);
 			RunAccountTests (list);
+			RunRemoteAccountTests (list);
+			RunTranslationRouterTests (list);
 			RunUpdateTests (list);
 			list.Add ("ALL TESTS PASSED");
 		} catch (Exception ex8) {

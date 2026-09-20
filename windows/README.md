@@ -2,7 +2,7 @@
 
 Yike 是一款基于 C#、WPF 和 DeepL API 的 Windows 桌面翻译工具，将文本翻译、划词翻译、图片 OCR 和语音功能放在同一个窗口中。
 
-本仓库为 Windows x64 版本。设置中已移除“账号与安全”页面，翻译使用你自己的 DeepL API 密钥。
+本仓库为 Windows x64 版本。应用支持 Yike 邮箱账号与公共 DeepL 体验额度，也可以继续使用你自己的 DeepL API 密钥。
 
 ![Yike 浅色界面](docs/images/main-light.png)
 
@@ -22,27 +22,29 @@ Yike 是一款基于 C#、WPF 和 DeepL API 的 Windows 桌面翻译工具，将
 - 朗读：提供在线自然语音和 Windows 本机语音。
 - 历史记录：保存文本和图片历史，支持收藏与删除。
 - 外观：浅色、深色和跟随系统主题，支持界面缩放、托盘和单实例运行。
+- 账号：邮箱验证码注册、登录、昵称与头像修改、加密会话、体验额度查询与退出登录。
 - 更新：从 GitHub 检查 Windows 稳定版，核对安装包大小和 SHA-256 后下载并安装，支持取消。
 
 ## 环境要求
 
 - Windows 10 2004 / Windows 11，x64。
 - .NET Framework 4.8；源码构建使用其自带的 C# 编译器。
-- 翻译需要网络及有效的 [DeepL API 密钥](https://www.deepl.com/your-account/keys)。本项目不附带共享密钥，API 额度与费用以服务提供方为准。
+- 翻译需要网络。注册并验证 Yike 邮箱账号后，每个账号一次获得 200,000 字符公共体验额度；即使已填写自己的 [DeepL API 密钥](https://www.deepl.com/your-account/keys)，仍会优先使用公共额度，个人密钥作为后备。
 - OCR 需要安装相应 Windows 语言的 OCR 功能；语音输入需要麦克风权限与 Whisper 运行库。
 
 ## 安装与使用
 
-下载 [Yike Windows 1.2.3 完整安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.3) 中的 `Yike-Setup.exe`，运行后安装到当前用户目录，无需管理员权限。完整安装包包含语音运行库；GitHub Actions 的核心构建产物用于开发与检查。
+下载 [Yike Windows 1.2.4 完整安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.4) 中的 `Yike-Setup.exe`，运行后安装到当前用户目录，无需管理员权限。完整安装包包含语音运行库；GitHub Actions 的核心构建产物用于开发与检查。
 
-1.2.3 修复应用内更新检查与版本一致性，权限页可检测真实组件状态，并修复设置跳转和窗口按钮行为；包含之前的划词小窗关闭按钮、语音输入和朗读优化。详细变更见 [CHANGELOG.md](CHANGELOG.md)。
+1.2.4 恢复邮箱验证码注册、账号登录、加密会话与每人 200,000 字符公共 DeepL 体验额度；个人 DeepL 密钥作为后备。详细变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 安装包旁的 `SHA256SUMS.txt` 可用于校验下载内容。
 
-1. 打开 Yike，点击顶部 **DeepL** 按钮。
-2. 输入自己的 API 密钥并保存；程序根据密钥选择 API Free / Pro 地址。
-3. 输入文字，选择原文和目标语言，按 `Enter` 翻译。
-4. 图片翻译可使用底部的“翻译图片”“截图翻译”和“OCR / 框选”入口。
+1. 打开 Yike，在 **设置 → 账号与安全** 中注册或登录；注册需要输入邮件中的六位验证码。
+2. 登录后优先使用公共体验额度；若公共额度不可用或语言不受支持，再使用个人 DeepL API 密钥。
+3. 登录后可在 **个人资料** 中修改昵称、选择头像或恢复默认头像；资料仅加密保存在当前电脑。
+4. 输入文字，选择原文和目标语言，按 `Enter` 翻译。
+5. 图片翻译可使用底部的“翻译图片”“截图翻译”和“OCR / 框选”入口。
 
 | 操作 | 快捷键 |
 | --- | --- |
@@ -112,7 +114,7 @@ third_party/         第三方许可证
 
 ## 隐私与配置
 
-DeepL API 密钥通过 Windows DPAPI 按当前用户加密，偏好和历史保存在 `%LOCALAPPDATA%\Yike\`。文本翻译会将原文发送到 DeepL，图片 OCR 在本机执行，识别出的文字在翻译时发送到 DeepL。在线朗读会发送朗读文本至 Microsoft 语音服务，Whisper 语音识别在本机运行。
+DeepL API 密钥、Yike 登录会话以及账号昵称/头像通过 Windows DPAPI 按当前用户加密，偏好和历史保存在 `%LOCALAPPDATA%\Yike\`。昵称和头像不上传服务器。使用公共体验额度时，账号请求和待翻译文字会发送到 `https://n5v1b.cn/yike-api/`，再由服务端调用 DeepL；使用个人密钥时文字直接发送到 DeepL。图片 OCR 在本机执行，识别出的文字仅在翻译时联网发送。在线朗读会发送朗读文本至 Microsoft 语音服务，Whisper 语音识别在本机运行。
 
 仓库不包含真实密钥、账号数据或个人翻译记录。检查更新请求本项目的 GitHub Windows Releases，下载后验证大小和 SHA-256；联网失败不会用本地清单冒充最新版。发布自己的版本时请修改更新仓库地址，或配置自己的 HTTPS 清单，详见 [发布说明](docs/GITHUB.md)。
 

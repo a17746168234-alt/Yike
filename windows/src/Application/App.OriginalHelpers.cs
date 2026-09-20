@@ -49,15 +49,24 @@ private void ApplyAccountIdentity ()
 {
 	if (window != null) {
 		AccountProfile current = accounts.Current;
-		BitmapSource bitmapSource = AvatarImages.Load (current);
+		BitmapSource bitmapSource = (remoteSession == null) ? AvatarImages.Load (current) : AvatarImages.Load (remoteSession.AvatarPngBase64);
 		System.Windows.Controls.Image image = Find<System.Windows.Controls.Image> ("AppIcon");
 		image.Source = bitmapSource ?? defaultAppIcon;
 		image.Stretch = ((bitmapSource == null) ? Stretch.Uniform : Stretch.UniformToFill);
 		image.Clip = ((bitmapSource == null) ? null : new EllipseGeometry (new System.Windows.Point (20.0, 20.0), 20.0, 20.0));
-		Find<TextBlock> ("AppDisplayName").Text = ((current == null) ? "Yike" : current.DisplayName);
+		string identity = (remoteSession != null && !string.IsNullOrWhiteSpace (remoteSession.DisplayName)) ? remoteSession.DisplayName : ((remoteSession != null && !string.IsNullOrWhiteSpace (remoteSession.Email)) ? remoteSession.Email : ((current == null) ? "Yike" : current.DisplayName));
+		Find<TextBlock> ("AppDisplayName").Text = identity;
+		TextBlock engineStatus = Find<TextBlock> ("EngineStatus");
+		if (remoteSession != null) {
+			engineStatus.Text = "Yike 公共 DeepL · 剩余 " + remoteSession.Remaining.ToString ("N0") + " 字符" + (string.IsNullOrWhiteSpace (Store.Key) ? "" : " · 个人密钥后备");
+		} else if (!string.IsNullOrWhiteSpace (Store.Key)) {
+			engineStatus.Text = "内容由你的 DeepL 密钥在线处理";
+		} else {
+			engineStatus.Text = "登录后使用公共 DeepL 体验额度";
+		}
 		window.Icon = bitmapSource ?? defaultAppIcon;
 		if (tray != null) {
-			string text = ((current == null) ? "Yike" : current.DisplayName);
+			string text = identity;
 			tray.Text = ((text.Length > 63) ? text.Substring (0, 63) : text);
 		}
 	}

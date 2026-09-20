@@ -203,6 +203,8 @@ private void ShowSettings (bool preview, string initialPage)
 		}
 	});
 	titles ["appearance"] = new string[2] { "外观", "调整 Yike 的界面显示" };
+	pages ["account"] = BuildAccountSettingsPage (preview);
+	titles ["account"] = new string[2] { "账号与安全", "注册、登录并管理公共翻译额度" };
 	pages ["deepl"] = BuildDeepLSettingsPage (preview);
 	titles ["deepl"] = new string[2] { "DeepL 密钥与帮助", "管理翻译服务与用量" };
 	StackPanel cards = new StackPanel ();
@@ -240,6 +242,7 @@ private void ShowSettings (bool preview, string initialPage)
 		}
 	};
 	AddSettingsNav (stackPanel6, navButtons, "appearance", "\ue790", "外观", action);
+	AddSettingsNav (stackPanel6, navButtons, "account", "\ue77b", "账号与安全", action);
 	AddSettingsNav (stackPanel6, navButtons, "deepl", "\ue72e", "DeepL 密钥与帮助", action);
 	AddSettingsNav (stackPanel6, navButtons, "speech", "\ue767", "在线朗读", action);
 	AddSettingsNav (stackPanel6, navButtons, "shortcuts", "\ue765", "快捷键与语音输入", action);
@@ -302,17 +305,14 @@ string path = initialPage == "deepl" ? "deepl-help.png" : initialPage == "about"
 
 private void SetOverlayResources (Window dialog)
 {
-	dialog.Resources ["WindowBrush"] = OverlayBrush ("#171F22");
-	dialog.Resources ["PanelBrush"] = OverlayBrush ("#1B2427");
-	dialog.Resources ["InkBrush"] = OverlayBrush ("#F1F5F6");
-	dialog.Resources ["MutedBrush"] = OverlayBrush ("#929DA0");
-	dialog.Resources ["LineBrush"] = OverlayBrush ("#354145");
-	dialog.Resources ["BackdropBrush"] = OverlayBrush ("#171F22");
-	dialog.Resources ["SurfaceBrush"] = OverlayBrush ("#8A1B2326");
-	dialog.Resources ["ControlBrush"] = OverlayBrush ("#2A3336");
-	dialog.Resources ["AccentBrush"] = OverlayBrush ("#1677F2");
-	dialog.Resources ["AccentHoverBrush"] = OverlayBrush ("#2B87F5");
-	dialog.Resources ["SoftAccentBrush"] = OverlayBrush ("#253C56");
+	string[] resourceKeys = new string[] {
+		"WindowBrush", "PanelBrush", "InkBrush", "MutedBrush", "LineBrush", "BackdropBrush",
+		"SurfaceBrush", "ControlBrush", "AccentBrush", "AccentHoverBrush", "SoftAccentBrush", "DangerBrush"
+	};
+	foreach (string resourceKey in resourceKeys) {
+		object resource = window.TryFindResource (resourceKey);
+		if (resource != null) dialog.Resources [resourceKey] = resource;
+	}
 }
 
 

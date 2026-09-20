@@ -1,0 +1,33 @@
+name: Windows build and regression tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build core application
+        run: .\build.ps1 -OutputDirectory dist\ci -SkipRuntimes
+      - name: Run offline regression tests
+        run: .\verify.ps1 -OutputDirectory dist\ci -SkipBuild -SelfTestOnly
+      - name: Upload core build and test report
+        uses: actions/upload-artifact@v7
+        with:
+          name: Yike-Windows-x64-core
+          path: dist/ci/
+          if-no-files-found: error
+          retention-days: 14

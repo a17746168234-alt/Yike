@@ -1,5 +1,5 @@
 {
-  "Version": "1.2.3.0",
-  "DownloadUrl": "https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.3",
-  "Notes": "Yike Windows 1.2.3：从 GitHub 检查 Windows 稳定版并校验安装包后更新；修复设置跳转、权限状态检测及窗口按钮行为。"
+  "Version": "1.2.4.0",
+  "DownloadUrl": "https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.4",
+  "Notes": "Yike Windows 1.2.4：恢复邮箱验证码注册、登录和每人 20 万字符公共 DeepL 体验额度；公共额度优先，个人密钥作为安全后备。"
 }

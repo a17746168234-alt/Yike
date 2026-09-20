@@ -83,6 +83,11 @@ private async void Translate ()
 	if (string.IsNullOrWhiteSpace (input.Text)) {
 		return;
 	}
+	if (string.IsNullOrWhiteSpace (Store.Key) && remoteSession == null) {
+		Status ("请先注册或登录 Yike 账号，或在设置中填写自己的 DeepL 密钥。");
+		ShowSettings (false, "account");
+		return;
+	}
 	Cancel ();
 	int ticket = revision;
 	pending = new CancellationTokenSource ();
@@ -96,7 +101,7 @@ private async void Translate ()
 	busy = true;
 	Find<System.Windows.Controls.Button> ("TranslateButton").Content = "取消";
 	UpdateActionAvailability ();
-	Status ("正在使用 DeepL 翻译…");
+	Status (remoteSession != null ? "正在优先使用 Yike 公共体验额度…" : "正在使用你的 DeepL 密钥翻译…");
 	try {
 		TranslationPlan plan = ((doc == null) ? TranslationPlan.Create (text) : null);
 		List<string> texts = ((doc == null) ? plan.Units : doc.Regions.Select ((Region r) => r.Text).ToList ());
@@ -123,7 +128,18 @@ private async void Translate ()
 				}
 			});
 		};
-		List<string> result = await new DeepL (Store.Key).TranslateProgressive (texts, requestSource, to, (doc == null) ? null : text, showLine, ct);
+		string publicSource = (from == "auto") ? detected.Code : from;
+		TranslationExecutionResult execution = await new TranslationRouter (Store.Key).TranslateProgressive (remoteSession, texts, publicSource, requestSource, to, (doc == null) ? null : text, showLine, ct);
+		List<string> result = execution.Values;
+		if (execution.UsedPublicQuota) {
+			RemoteAccountSessionStore.Save (remoteSession);
+			ApplyAccountIdentity ();
+		}
+		if (execution.PublicSessionRejected) {
+			remoteSession = null;
+			RemoteAccountSessionStore.Clear ();
+			ApplyAccountIdentity ();
+		}
 		if (ticket != revision) {
 			return;
 		}
@@ -142,14 +158,15 @@ private async void Translate ()
 			}
 		}
 		UpdateResult ();
-		Status ("翻译完成 · DeepL" + ((from == "auto") ? (" · 已识别 " + detected.Name) : ""));
+		string engineName = execution.EngineName;
+		Status ("翻译完成 · " + engineName + ((from == "auto") ? (" · 已识别 " + detected.Name) : ""));
 		if (ticket == revision && prefs.History) {
 			history.Insert (0, new Entry {
 				Original = text,
 				Result = output.Text,
 				Source = from,
 				Target = to,
-				Engine = "DeepL",
+				Engine = engineName,
 				Date = DateTime.Now
 			});
 			Store.Write ("history.json", history);
@@ -160,6 +177,12 @@ private async void Translate ()
 		}
 	} catch (Exception ex2) {
 		if (ticket == revision) {
+			YikeApiException apiError = ex2 as YikeApiException;
+			if (apiError != null && apiError.ErrorCode == "login_required") {
+				remoteSession = null;
+				RemoteAccountSessionStore.Clear ();
+				ApplyAccountIdentity ();
+			}
 			Status ("翻译失败：" + ex2.Message);
 		}
 	} finally {

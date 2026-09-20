@@ -135,7 +135,42 @@ private Window Dialog (string title, double width, double height, UIElement cont
 
 private System.Windows.Media.Brush OverlayBrush (string color)
 {
+	string resourceKey = OverlayResourceKey (color);
+	if (window != null && resourceKey != null) {
+		System.Windows.Media.Brush resourceBrush = window.TryFindResource (resourceKey) as System.Windows.Media.Brush;
+		if (resourceBrush != null) return resourceBrush;
+	}
 	return ThemeBrush (IsDarkAppearance () ? color : LightOverlayColor (color));
+}
+
+
+private static string OverlayResourceKey (string color)
+{
+	if (string.IsNullOrWhiteSpace (color)) return null;
+	switch (color.ToUpperInvariant ()) {
+	case "#F3161D20": case "#F1171F22": case "#E5171F22": case "#171F22":
+		return "WindowBrush";
+	case "#D91B282A": case "#1B2427":
+		return "PanelBrush";
+	case "#8A1B2326": case "#781B2326": case "#521B2427": case "#481C2528":
+		return "SurfaceBrush";
+	case "#20282B": case "#222B2E": case "#293235": case "#2A3336": case "#303A3D":
+		return "ControlBrush";
+	case "#344044": case "#344145": case "#354044": case "#354145": case "#3B494D": case "#55636D71": case "#536166": case "#26445D":
+		return "LineBrush";
+	case "#253C56": case "#142A3C": case "#172B3D": case "#183758":
+		return "SoftAccentBrush";
+	case "#1677F2": case "#2388FA": case "#2489FA": case "#2579B8": case "#2789F7": case "#2B87F5": case "#3475B3": case "#4A9CFF":
+		return "AccentBrush";
+	case "#F4F7F8": case "#F2F7FA": case "#F2F6F7": case "#F1F5F6": case "#F0F4F5": case "#EEF3F4": case "#EDF2F3": case "#E7ECEE": case "#E2E8EA": case "#DCE3E5": case "#CFD7D9":
+		return "InkBrush";
+	case "#718083": case "#819095": case "#829095": case "#879296": case "#8E999D": case "#8F9A9D": case "#929DA0": case "#9AA6A9": case "#9DA7AA": case "#A7B1B4": case "#AAB4B7": case "#AFCBE5":
+		return "MutedBrush";
+	case "#FF5A5F": case "#FF5D62": case "#FF656A": case "#FF686D":
+		return "DangerBrush";
+	default:
+		return null;
+	}
 }
 
 

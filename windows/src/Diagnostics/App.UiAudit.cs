@@ -50,9 +50,24 @@ private void VerifyUiAudit ()
 		if (this.window.WindowStyle != WindowStyle.None || Find<System.Windows.Controls.Button> ("MinimizeWindowButton") == null || Find<System.Windows.Controls.Button> ("MaximizeWindowButton") == null || Find<System.Windows.Controls.Button> ("CloseWindowButton") == null) {
 			throw new Exception ("无图标自定义标题栏未正确启用。");
 		}
+		System.Windows.Controls.Button[] traffic = new System.Windows.Controls.Button[] {
+			Find<System.Windows.Controls.Button> ("CloseWindowButton"),
+			Find<System.Windows.Controls.Button> ("MinimizeWindowButton"),
+			Find<System.Windows.Controls.Button> ("MaximizeWindowButton")
+		};
+		string[] trafficTags = new string[] { "main-traffic-close", "main-traffic-minimize", "main-traffic-maximize" };
+		for (int i = 0; i < traffic.Length; i++) {
+			if (!object.Equals (traffic [i].Tag, trafficTags [i]) || traffic [i].Width != 14.0 || traffic [i].Height != 14.0) {
+				throw new Exception ("主窗口未使用与设置窗口一致的红黄绿控制点。");
+			}
+		}
+		StackPanel trafficPanel = traffic [0].Parent as StackPanel;
+		if (trafficPanel == null || trafficPanel.HorizontalAlignment != System.Windows.HorizontalAlignment.Left || !object.ReferenceEquals (trafficPanel.Children [0], traffic [0]) || !object.ReferenceEquals (trafficPanel.Children [1], traffic [1]) || !object.ReferenceEquals (trafficPanel.Children [2], traffic [2])) {
+			throw new Exception ("主窗口红黄绿控制点的位置或顺序不正确。");
+		}
 		WindowChrome windowChrome = WindowChrome.GetWindowChrome (this.window);
 		Border border = Find<Border> ("MainWindowFrame");
-		if (windowChrome == null || !this.window.AllowsTransparency || border.CornerRadius.TopLeft != 32.0 || windowChrome.CornerRadius.TopLeft != 32.0 || windowChrome.CornerRadius.TopRight != 32.0 || windowChrome.CornerRadius.BottomLeft != 32.0 || windowChrome.CornerRadius.BottomRight != 32.0) {
+		if (windowChrome == null || windowChrome.CaptionHeight != 48.0 || !this.window.AllowsTransparency || border.CornerRadius.TopLeft != 32.0 || windowChrome.CornerRadius.TopLeft != 32.0 || windowChrome.CornerRadius.TopRight != 32.0 || windowChrome.CornerRadius.BottomLeft != 32.0 || windowChrome.CornerRadius.BottomRight != 32.0) {
 			throw new Exception ("主窗口四角未与设置窗口使用相同圆角。");
 		}
 		Window window = Dialog ("窗口样式检查", 420.0, 280.0, new Grid ());
@@ -69,8 +84,8 @@ private void VerifyUiAudit ()
 		if (Find<TextBlock> ("Status").FontSize < 11.5 || Find<TextBlock> ("Status").FontSize > 12.0) {
 			throw new Exception ("左下角快捷键提示字号不符合要求。");
 		}
-		if (Find<TextBlock> ("EngineStatus").Text != "内容由 DeepL 在线处理") {
-			throw new Exception ("主页 DeepL 状态提示未更新。");
+		if (Find<TextBlock> ("EngineStatus").Text != "登录后使用公共 DeepL 体验额度") {
+			throw new Exception ("主页账号与公共 DeepL 状态提示未更新。");
 		}
 		System.Windows.Controls.Button button = Find<System.Windows.Controls.Button> ("SettingsButton");
 		TextBlock textBlock = button.Content as TextBlock;
@@ -180,8 +195,13 @@ private void VerifyUiAudit ()
 		if (settingsWindow == null || !settingsWindow.IsVisible || !settingsWindow.IsEnabled || !this.window.IsEnabled) {
 			throw new Exception ("设置窗口仍以模态方式锁定主窗口。");
 		}
-		settingsWindow.UpdateLayout(); if (UiDescendants((DependencyObject)settingsWindow.Content).OfType<TextBlock>().Any(x => x.Text == "账号与安全")) throw new Exception("已删除的账号与安全仍在设置中。"); settingsWindow.Close();
-		File.WriteAllText (path, "PASS: top-right icons and labels share one inline baseline; DeepL privacy text is present; translation context controls are absent; space keydown starts the hold-to-talk timer and keyup ends it; live speech drafts update in place and separate Chinese/English boundaries; settings icon fits; text menu has 4 actions; clear restores the shortcut hint; empty-state actions are disabled; translation/result actions enable correctly; idle speech controls stay hidden; selection translation keeps only the latest popup and offers all target languages; account and security section is absent; all other existing UI checks passed.");
+		foreach (string resourceKey in new string[] { "WindowBrush", "PanelBrush", "InkBrush", "MutedBrush", "LineBrush", "SurfaceBrush", "ControlBrush", "AccentBrush", "SoftAccentBrush" }) {
+			if (!object.ReferenceEquals (this.window.TryFindResource (resourceKey), settingsWindow.TryFindResource (resourceKey))) {
+				throw new Exception ("设置窗口没有与主界面共享颜色资源：" + resourceKey);
+			}
+		}
+		ShowSettings (false, "account"); settingsWindow.UpdateLayout(); if (!UiDescendants((DependencyObject)settingsWindow.Content).OfType<TextBlock>().Any(x => x.Text == "账号与安全")) throw new Exception("账号与安全没有恢复到设置中。"); settingsWindow.Close();
+		File.WriteAllText (path, "PASS: main and dialog windows use matching left-side traffic-light controls; settings share the exact main-window palette; account registration and login section is present; DeepL privacy text is present; translation context controls are absent; space keydown starts the hold-to-talk timer and keyup ends it; live speech drafts update in place and separate Chinese/English boundaries; settings icon fits; text menu has 4 actions; clear restores the shortcut hint; empty-state actions are disabled; translation/result actions enable correctly; idle speech controls stay hidden; selection translation keeps only the latest popup and offers all target languages; all other existing UI checks passed.");
 	} catch (Exception ex) {
 		File.WriteAllText (path, "FAIL: " + ex);
 		Environment.ExitCode = 1;

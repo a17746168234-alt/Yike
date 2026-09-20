@@ -43,10 +43,10 @@ using Microsoft.Win32;
 
 [assembly: CompilationRelaxations (8)]
 
-[assembly: AssemblyFileVersion ("1.2.3.0")]
+[assembly: AssemblyFileVersion ("1.2.4.0")]
 
 [assembly: RuntimeCompatibility (WrapNonExceptionThrows = true)]
 
 [assembly: AssemblyTitle ("Yike")]
 
-[assembly: AssemblyVersion ("1.2.3.0")]
+[assembly: AssemblyVersion ("1.2.4.0")]
