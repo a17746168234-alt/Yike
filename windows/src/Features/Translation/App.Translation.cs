@@ -88,6 +88,9 @@ private async void Translate ()
 		ShowSettings (false, "account");
 		return;
 	}
+	// A new translation starts a new result lifecycle. Never leave the previous
+	// result's paused audio available behind a misleading "继续" action.
+	speech.Stop ();
 	Cancel ();
 	int ticket = revision;
 	pending = new CancellationTokenSource ();
