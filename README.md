@@ -9,7 +9,7 @@
 
 Windows 版采用 C# / WPF，支持邮箱注册、每位已验证用户 200,000 字符公共 DeepL 体验额度，也可配置个人 DeepL API 密钥作为后备。
 
-Windows 下载：[Yike Windows 1.2.4 完整安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.4)（x64，包含语音运行库）。
+Windows 下载：[Yike Windows 1.2.5 完整安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.5)（x64，包含语音运行库）。
 
 ## macOS 版说明
 
