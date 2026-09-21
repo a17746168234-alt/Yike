@@ -42,25 +42,42 @@ public partial class App {
 private void OpenCurrentOcr ()
 {
 	if (original == null) {
-		System.Windows.Controls.ContextMenu contextMenu = new System.Windows.Controls.ContextMenu ();
-		System.Windows.Controls.MenuItem menuItem = new System.Windows.Controls.MenuItem ();
-		menuItem.Header = "选择图片识别";
-		System.Windows.Controls.MenuItem menuItem2 = menuItem;
-		menuItem2.Click += delegate {
-			OpenOcr ();
-		};
-		System.Windows.Controls.MenuItem menuItem3 = new System.Windows.Controls.MenuItem ();
-		menuItem3.Header = "截图框选识别";
-		System.Windows.Controls.MenuItem menuItem4 = menuItem3;
-		menuItem4.Click += delegate {
-			Capture (true);
-		};
-		contextMenu.Items.Add (menuItem2);
-		contextMenu.Items.Add (menuItem4);
+		System.Windows.Controls.ContextMenu contextMenu = BuildOcrMenu ();
 		contextMenu.IsOpen = true;
 	} else {
 		RegionOcr (original);
 	}
+}
+
+
+private System.Windows.Controls.ContextMenu BuildOcrMenu ()
+{
+	System.Windows.Controls.Button anchor = Find<System.Windows.Controls.Button> ("OcrButton");
+	System.Windows.Controls.ContextMenu contextMenu = new System.Windows.Controls.ContextMenu {
+		PlacementTarget = anchor,
+		Placement = PlacementMode.Bottom,
+		VerticalOffset = 6.0,
+		MinWidth = Math.Max (220.0, anchor.ActualWidth)
+	};
+	contextMenu.Style = (Style)window.FindResource ("ToolbarContextMenu");
+	Style itemStyle = (Style)window.FindResource ("ToolbarMenuItem");
+	System.Windows.Controls.MenuItem menuItem = new System.Windows.Controls.MenuItem ();
+	menuItem.Header = IconText ("\ue91b", "选择图片识别", 15.0);
+	menuItem.Style = itemStyle;
+	System.Windows.Controls.MenuItem menuItem2 = menuItem;
+	menuItem2.Click += delegate {
+		OpenOcr ();
+	};
+	System.Windows.Controls.MenuItem menuItem3 = new System.Windows.Controls.MenuItem ();
+	menuItem3.Header = IconText ("\ue7b3", "截图框选识别", 15.0);
+	menuItem3.Style = itemStyle;
+	System.Windows.Controls.MenuItem menuItem4 = menuItem3;
+	menuItem4.Click += delegate {
+		Capture (true);
+	};
+	contextMenu.Items.Add (menuItem2);
+	contextMenu.Items.Add (menuItem4);
+	return contextMenu;
 }
 
 
