@@ -133,6 +133,12 @@ private void VerifyUiAudit ()
 		if (output.IsReadOnly || output.ContextMenu == null || output.ContextMenu.Items.Count != 4) {
 			throw new Exception ("译文框未开放编辑、删除或完整编辑菜单。");
 		}
+		System.Windows.Controls.ContextMenu ocrMenu = BuildOcrMenu ();
+		if (!object.ReferenceEquals (ocrMenu.PlacementTarget, Find<System.Windows.Controls.Button> ("OcrButton")) ||
+			!object.ReferenceEquals (ocrMenu.Style, this.window.FindResource ("ToolbarContextMenu")) || ocrMenu.Items.Count != 2 ||
+			ocrMenu.Items.Cast<System.Windows.Controls.MenuItem> ().Any (x => !object.ReferenceEquals (x.Style, this.window.FindResource ("ToolbarMenuItem")))) {
+			throw new Exception ("OCR / 框选菜单未复用主界面的锚点、颜色和圆角样式。");
+		}
 		VoiceWaveform voiceWaveform = new VoiceWaveform ();
 		voiceWaveform.Update (90);
 		Grid grid = (Grid)voiceWaveform.Content.Children [1];
@@ -201,7 +207,7 @@ private void VerifyUiAudit ()
 			}
 		}
 		ShowSettings (false, "account"); settingsWindow.UpdateLayout(); if (!UiDescendants((DependencyObject)settingsWindow.Content).OfType<TextBlock>().Any(x => x.Text == "账号与安全")) throw new Exception("账号与安全没有恢复到设置中。"); settingsWindow.Close();
-		File.WriteAllText (path, "PASS: main and dialog windows use matching left-side traffic-light controls; settings share the exact main-window palette; account registration and login section is present; DeepL privacy text is present; translation context controls are absent; space keydown starts the hold-to-talk timer and keyup ends it; live speech drafts update in place and separate Chinese/English boundaries; settings icon fits; text menu has 4 actions; clear restores the shortcut hint; empty-state actions are disabled; translation/result actions enable correctly; idle speech controls stay hidden; selection translation keeps only the latest popup and offers all target languages; all other existing UI checks passed.");
+		File.WriteAllText (path, "PASS: main and dialog windows use matching left-side traffic-light controls; OCR menu shares the main-window palette and rounded toolbar design; settings share the exact main-window palette; account registration and login section is present; DeepL privacy text is present; translation context controls are absent; space keydown starts the hold-to-talk timer and keyup ends it; live speech drafts update in place and separate Chinese/English boundaries; settings icon fits; text menu has 4 actions; clear restores the shortcut hint; empty-state actions are disabled; translation/result actions enable correctly; idle speech controls stay hidden; selection translation keeps only the latest popup and offers all target languages; all other existing UI checks passed.");
 	} catch (Exception ex) {
 		File.WriteAllText (path, "FAIL: " + ex);
 		Environment.ExitCode = 1;
