@@ -11,6 +11,8 @@ final class PopupVoiceInput {
     private var session: UUID?
     private var hasTap = false
     private var completion: ((String?) -> Void)?
+    private let silenceTimeout: UInt64 = 6
+    private let silenceThreshold: Float = 0.015
 
     func start(onText: @escaping (String) -> Void, onFinish: @escaping (String?) -> Void) {
         cancel()
@@ -47,6 +49,10 @@ final class PopupVoiceInput {
             }
             input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
                 audioRequest.append(buffer)
+                let rms = Self.rms(of: buffer)
+                Task { @MainActor in
+                    self.handleAudioLevel(rms, id: id)
+                }
             }
             hasTap = true
             do {
@@ -56,20 +62,44 @@ final class PopupVoiceInput {
                 finish(error: "无法启动麦克风，请稍后重试")
                 return
             }
-            scheduleStop(after: 8, id: id)
+            // Finish after six seconds without meaningful microphone input.
+            scheduleStop(after: silenceTimeout, id: id)
             recognition = recognizer.recognitionTask(with: audioRequest) { [weak self] result, error in
                 Task { @MainActor in
                     guard let self, self.session == id else { return }
                     if let result {
-                        let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let rawText = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let text = Self.simplifiedChinese(rawText)
                         onText(text)
                         if result.isFinal { self.finish(); return }
-                        self.scheduleStop(after: 2, id: id)
                     }
                     if error != nil { self.finish(error: "语音识别中断，请重新尝试") }
                 }
             }
         }
+    }
+
+    private func handleAudioLevel(_ rms: Float, id: UUID) {
+        guard session == id else { return }
+        if rms >= silenceThreshold {
+            scheduleStop(after: silenceTimeout, id: id)
+        }
+    }
+
+    private static func rms(of buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData?.pointee else { return 0 }
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else { return 0 }
+        var energy: Float = 0
+        for index in 0..<frameCount {
+            let sample = channelData[index]
+            energy += sample * sample
+        }
+        return (energy / Float(frameCount)).squareRoot()
+    }
+
+    private static func simplifiedChinese(_ text: String) -> String {
+        text.applyingTransform(StringTransform(rawValue: "Traditional-Simplified"), reverse: false) ?? text
     }
 
     private func scheduleStop(after seconds: UInt64, id: UUID) {
