@@ -1829,7 +1829,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                         lastPreview = Date()
                         self.updateLocalPreview(id: id, file: file)
                     }
-                    if !recorder.isRecording || (heardSpeech && Date().timeIntervalSince(lastSound) > 3.5) || (!heardSpeech && Date().timeIntervalSince(started) > 10) {
+                    if !recorder.isRecording || (heardSpeech && Date().timeIntervalSince(lastSound) >= 6) || (!heardSpeech && Date().timeIntervalSince(started) >= 6) {
                         if heardSpeech { self.finishLocalRecording(id: id) }
                         else { self.cancelVoiceInput(); self.setInfo("没有听到清晰语音，请检查麦克风后再试。") }
                         return
@@ -1856,7 +1856,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 try data.write(to: snapshot, options: .atomic)
                 let result = try await self.partialSpeech.transcribe(audioURL: snapshot)
                 guard self.voiceSession == id, self.isListening, !Task.isCancelled else { return }
-                self.appendVoiceText(result.text)
+                self.appendVoiceText(result.text, language: result.language)
                 self.detectedVoiceLanguage = result.language
                 self.voiceInputStatus = "\(languageName(result.language)) · 正在聆听 · 回车完成"
             } catch {
@@ -1899,7 +1899,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             do {
                 let result = try await self.localSpeech.transcribe(audioURL: file)
                 guard self.voiceSession == id, !Task.isCancelled else { return }
-                self.appendVoiceText(result.text)
+                self.appendVoiceText(result.text, language: result.language)
                 self.detectedVoiceLanguage = result.language
                 self.targetLanguage = result.language == "en" ? "zh-CN" : (result.language == "zh-CN" ? "en" : "zh-CN")
                 self.isVoiceProcessing = false
@@ -1914,7 +1914,10 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         }
     }
 
-    private func appendVoiceText(_ spokenText: String) {
+    private func appendVoiceText(_ rawText: String, language: String) {
+        let spokenText = language == "zh-CN"
+            ? (rawText.applyingTransform(StringTransform(rawValue: "Traditional-Simplified"), reverse: false) ?? rawText)
+            : rawText
         let combined = speechBaseText.isEmpty ? spokenText : "\(speechBaseText) \(spokenText)"
         lastRecognizedText = String(combined.prefix(maxSourceCharacters))
         sourceText = lastRecognizedText
@@ -1977,6 +1980,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             Task { @MainActor in
                 guard let self, self.voiceSession == id else { return }
                 self.microphoneLevel = level
+                if db > -42 { self.scheduleAutomaticStop(after: 6, id: id) }
             }
         }
         hasInputTap = true
@@ -1986,7 +1990,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             isListening = true
             notice = nil
             voiceInputStatus = "正在聆听\(languageName(language))…"
-            scheduleAutomaticStop(after: 8, id: id)
+            scheduleAutomaticStop(after: 6, id: id)
         } catch {
             cancelVoiceInput(); setError("无法启动麦克风，请检查设备后重试。"); return
         }
@@ -1995,9 +1999,8 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 guard let self, self.voiceSession == id else { return }
                 if let result {
                     let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !text.isEmpty { self.appendVoiceText(text) }
+                    if !text.isEmpty { self.appendVoiceText(text, language: language) }
                     if result.isFinal { self.cancelVoiceInput(); return }
-                    self.scheduleAutomaticStop(after: 4, id: id)
                 }
                 if error != nil {
                     self.cancelVoiceInput()
