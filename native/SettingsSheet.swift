@@ -158,7 +158,7 @@ struct SettingsSheet: View {
         .alert(updateAlertTitle, isPresented: $showUpdateResult) {
             if updateCheckResult == .available {
                 Button("暂不更新", role: .cancel) { }
-                Button("立即更新") { dismiss(); Task { await updater.installNow() } }
+                Button("立即更新") { Task { await updater.installNow() } }
             } else {
                 Button("知道了", role: .cancel) { }
             }
@@ -173,6 +173,10 @@ struct SettingsSheet: View {
             Button("知道了", role: .cancel) { }
         } message: {
             Text(updater.status)
+        }
+        .sheet(isPresented: $updater.showsProgress) {
+            YikeUpdateProgressView(updater: updater)
+                .interactiveDismissDisabled(updater.isChecking)
         }
         .task(id: keyButtonHighlighted) {
             guard keyButtonHighlighted else { return }

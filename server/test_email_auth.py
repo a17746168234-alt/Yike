@@ -89,7 +89,7 @@ class EmailTests(unittest.TestCase):
         manifest.write_text('{"version":"1.6","build":69,"title":"Yike 1.6","notes":"test","download_url":"https://github.com/a17746168234-alt/Yike/releases/latest/download/Yike-macOS-arm64.dmg","sha256":"'+'a'*64+'"}')
         self.service.update_path=manifest
         self.assertEqual(self.service.dispatch('GET','/v1/update/macos',{},'',self.ip)['build'],69)
-        mirror='https://n5v1b.cn/yike-download/Yike-macOS-arm64-v1.6.dmg'
+        mirror='https://n5v1b.cn/yike-download/Yike-macOS-arm64-v1.6-build69.dmg'
         manifest.write_text(manifest.read_text().replace('https://github.com/a17746168234-alt/Yike/releases/latest/download/Yike-macOS-arm64.dmg',mirror))
         self.assertEqual(self.service.dispatch('GET','/v1/update/macos',{},'',self.ip)['download_url'],mirror)
         manifest.write_text(manifest.read_text().replace('n5v1b.cn','untrusted.example'))

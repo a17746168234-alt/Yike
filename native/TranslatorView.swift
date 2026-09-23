@@ -175,7 +175,10 @@ struct TranslatorView: View {
         } message: {
             Text(updater.status)
         }
-        .sheet(isPresented: $updater.showsProgress) {
+        .sheet(isPresented: Binding(
+            get: { updater.showsProgress && !showSettings && !model.showSharedAccount },
+            set: { if !$0 { updater.showsProgress = false } }
+        )) {
             YikeUpdateProgressView(updater: updater)
                 .interactiveDismissDisabled(updater.isChecking)
         }

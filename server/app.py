@@ -92,8 +92,9 @@ class Service:
                 required=required+('size',)
             else:
                 if not re.fullmatch(r'\d+\.\d+(?:\.\d+)?',value['version']): raise ValueError()
-                mirror=f"https://n5v1b.cn/yike-download/Yike-macOS-arm64-v{value['version']}.dmg"
-                if not github_release and value['download_url']!=mirror: raise ValueError()
+                mirror=f"https://n5v1b.cn/yike-download/Yike-macOS-arm64-v{value['version']}-build{value['build']}.dmg"
+                legacy_mirror=f"https://n5v1b.cn/yike-download/Yike-macOS-arm64-v{value['version']}.dmg"
+                if not github_release and value['download_url'] not in (mirror,legacy_mirror): raise ValueError()
             return {key:value[key] for key in required}
         except Exception:
             raise APIError(503,'update_unavailable','暂时无法获取版本信息，请稍后重试。')

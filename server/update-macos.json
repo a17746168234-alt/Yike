@@ -1,8 +1,8 @@
 {
   "version": "2.3",
-  "build": 74,
-  "title": "Yike 2.3 Build 74 · 资料同步与可见更新",
-  "notes": "头像和昵称同步到 Yike 服务器；下载更新时显示进度，校验完成后可一键退出并重启，安装成功的新版本会显示完成提示。",
-  "download_url": "https://n5v1b.cn/yike-download/Yike-macOS-arm64-v2.3.dmg",
-  "sha256": "1b0156353756f7b8dac8db762cbc9f433e7d3a6b534a85053b2d8c38a1e170b9"
+  "build": 75,
+  "title": "Yike 2.3 Build 75 · 更新反馈修复",
+  "notes": "下载更新时显示进度，校验完成后可点击“退出并重启 Yike”；从旧版升级后首次启动会显示“更新完毕”。头像和昵称仍可同步到服务器。",
+  "download_url": "https://n5v1b.cn/yike-download/Yike-macOS-arm64-v2.3-build75.dmg",
+  "sha256": "182d19963d4083b620c7d5d0dbc2a4e88f84f90aa7b44863a918eb945f120ce9"
 }

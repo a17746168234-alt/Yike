@@ -75,12 +75,13 @@ Unblock-File -Path "$env:USERPROFILE\Downloads\Yike-Setup.exe"
 
 打开 `outputs/Yike-macOS-arm64.dmg`，将「Yike」拖入 Applications。
 
-当前安装包为 **2.3（Build 74），Apple Silicon / arm64**。Apple 翻译需要 **macOS 15 或以上**，每台 Mac 首次使用需联网确认并下载对应语言包；安装包不包含语言包或 DeepL 密钥。本应用的 Apple 翻译不支持 Windows。个人 DeepL 需要用户自行设置 API Free 密钥；公共体验可在设置的“账号与安全”注册领取额度，服务开启状态以页面提示为准。
+当前安装包为 **2.3（Build 75），Apple Silicon / arm64**。Apple 翻译需要 **macOS 15 或以上**，每台 Mac 首次使用需联网确认并下载对应语言包；安装包不包含语言包或 DeepL 密钥。本应用的 Apple 翻译不支持 Windows。个人 DeepL 需要用户自行设置 API Free 密钥；公共体验可在设置的“账号与安全”注册领取额度，服务开启状态以页面提示为准。
 
 ## v2.3 更新
 
 - 所有已登录用户可将头像和昵称同步保存在服务器，换设备登录时读取；旧版本本机资料会在首次登录后迁移。
 - 点击立即更新后显示真实下载进度，校验完成可点击“退出并重启 Yike”；新版启动后显示“更新完毕”。
+- Build 75 修复从旧版升级后缺少完成提示，以及从设置页开始更新时进度窗可能被关闭设置的动作挡住的问题；更新安装包改由 Yike 服务器同域下载。
 
 ## v2.2 更新
 

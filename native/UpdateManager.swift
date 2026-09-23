@@ -78,6 +78,7 @@ final class UpdateManager: ObservableObject {
     private var stagedDMG: URL?
 
     private let lastCheckKey = "yike.update.lastCheck"
+    private let lastLaunchedBuildKey = "yike.update.lastLaunchedBuild"
     private let interval: TimeInterval = 24 * 60 * 60
 
     var currentBuild: Int {
@@ -88,10 +89,18 @@ final class UpdateManager: ObservableObject {
 
     func checkIfNeeded() async {
         let pending = UserDefaults.standard.integer(forKey: "yike.update.pendingBuild")
+        let previousBuild = UserDefaults.standard.integer(forKey: lastLaunchedBuildKey)
+        let checkedInOlderBuild = UserDefaults.standard.double(forKey: lastCheckKey) > 0
         if pending > 0, currentBuild >= pending {
             UserDefaults.standard.removeObject(forKey: "yike.update.pendingBuild")
             showsUpdateComplete = true
+        } else if previousBuild > 0, currentBuild > previousBuild {
+            showsUpdateComplete = true
+        } else if previousBuild == 0, currentBuild >= 75, checkedInOlderBuild {
+            // Build 73/74 did not record a pending build before relaunch.
+            showsUpdateComplete = true
         }
+        UserDefaults.standard.set(currentBuild, forKey: lastLaunchedBuildKey)
         let last = UserDefaults.standard.double(forKey: lastCheckKey)
         guard Date().timeIntervalSince1970 - last >= interval else { return }
         _ = await check(force: false)
@@ -137,7 +146,7 @@ final class UpdateManager: ObservableObject {
             showsInstallReady = true
         } catch {
             downloadProgress = nil
-            status = error is UpdateError ? "安装包校验失败，已保留当前版本。" : "更新失败，已保留当前版本，请稍后重试。"
+            status = error is UpdateError ? "安装包校验失败，已保留当前版本。" : "更新失败：\(error.localizedDescription) 已保留当前版本，请稍后重试。"
             showsInstallError = true
         }
     }
