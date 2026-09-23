@@ -1,4 +1,4 @@
-import concurrent.futures, tempfile, unittest
+import base64, concurrent.futures, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 from app import Service, APIError
@@ -97,6 +97,20 @@ class EmailTests(unittest.TestCase):
         self.error('update_unavailable',lambda:self.service.dispatch('GET','/v1/update/windows',{},'',self.ip))
         manifest.write_text('{}')
         self.error('update_unavailable',lambda:self.service.dispatch('GET','/v1/update/macos',{},'',self.ip))
+    def test_profile_persists_across_login_and_rejects_bad_avatar(self):
+        signed=self.verify(self.send())
+        token=signed['token']
+        avatar=base64.b64encode(b'\xff\xd8\xff'+b'photo').decode()
+        saved=self.service.dispatch('POST','/v1/profile',{'profile_name':'测试User','avatar_data':avatar},token,self.ip)
+        self.assertEqual(saved['account']['profile_name'],'测试User')
+        self.assertEqual(saved['account']['avatar_data'],avatar)
+        reloaded=Service(Path(self.temp.name)/'db','s'*40,mailer=lambda *args:self.sent.append(args))
+        self.assertEqual(reloaded.dispatch('GET','/v1/me',{},token,self.ip)['account']['avatar_data'],avatar)
+        self.error('login_required',lambda:reloaded.dispatch('POST','/v1/profile',{'profile_name':'Other','avatar_data':None},'',self.ip))
+        self.error('avatar',lambda:reloaded.dispatch('POST','/v1/profile',{'profile_name':'Valid','avatar_data':'not-base64'},token,self.ip))
+        self.error('profile_name',lambda:reloaded.dispatch('POST','/v1/profile',{'profile_name':'bad name','avatar_data':None},token,self.ip))
+        cleared=reloaded.dispatch('POST','/v1/profile',{'profile_name':'新名','avatar_data':None},token,self.ip)
+        self.assertIsNone(cleared['account']['avatar_data'])
     def test_migration_removes_only_challenge_table_and_preserves_accounts(self):
         signed=self.verify(self.send())
         with self.service.db() as db:

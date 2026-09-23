@@ -1,8 +1,8 @@
 {
-  "version": "2.2",
-  "build": 73,
-  "title": "Yike 2.2 Build 73 · 语音与更新反馈",
-  "notes": "有效声音结束后连续 3 秒没有新的有效声音时，自动执行回车翻译；立即更新完成后显示“更新完毕”，随后退出并重新启动 Yike。",
-  "download_url": "https://github.com/a17746168234-alt/Yike/releases/download/v2.2/Yike-macOS-arm64.dmg",
-  "sha256": "700503a82620e669712bf2fb8a4b2e157a960a5616619e06124ee8d0d7fc6ffa"
+  "version": "2.3",
+  "build": 74,
+  "title": "Yike 2.3 Build 74 · 资料同步与可见更新",
+  "notes": "头像和昵称同步到 Yike 服务器；下载更新时显示进度，校验完成后可一键退出并重启，安装成功的新版本会显示完成提示。",
+  "download_url": "https://github.com/a17746168234-alt/Yike/releases/download/v2.3/Yike-macOS-arm64.dmg",
+  "sha256": "1b0156353756f7b8dac8db762cbc9f433e7d3a6b534a85053b2d8c38a1e170b9"
 }

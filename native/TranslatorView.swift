@@ -175,6 +175,15 @@ struct TranslatorView: View {
         } message: {
             Text(updater.status)
         }
+        .sheet(isPresented: $updater.showsProgress) {
+            YikeUpdateProgressView(updater: updater)
+                .interactiveDismissDisabled(updater.isChecking)
+        }
+        .alert("Yike 更新完毕", isPresented: $updater.showsUpdateComplete) {
+            Button("知道了") { }
+        } message: {
+            Text("已安装并启动最新版本。")
+        }
     }
 
     private var header: some View {

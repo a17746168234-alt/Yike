@@ -18,9 +18,30 @@ import CryptoKit
         let chars = Array(name.unicodeScalars)
         return !chars.isEmpty && chars.allSatisfy { (65...90).contains($0.value) || (97...122).contains($0.value) || (0x3400...0x9FFF).contains($0.value) } && chars.reduce(0) { $0 + ($1.isASCII ? 1 : 2) } <= 12
     }
+    func cachedName(_ email: String) -> String? { UserDefaults.standard.string(forKey: key(email) + ".name") }
+    func cachedAvatar(_ email: String) -> Data? { UserDefaults.standard.data(forKey: key(email) + ".avatar") }
+    func uploadAvatar(_ email: String) -> Data? {
+        guard let source = cachedAvatar(email), let image = NSImage(data: source) else { return nil }
+        let side = min(image.size.width, image.size.height)
+        let target = NSImage(size: NSSize(width: 128, height: 128))
+        target.lockFocus()
+        image.draw(in: NSRect(x: 0, y: 0, width: 128, height: 128), from: NSRect(x: (image.size.width-side)/2, y: (image.size.height-side)/2, width: side, height: side), operation: .copy, fraction: 1)
+        target.unlockFocus()
+        guard let tiff = target.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        return bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.72])
+    }
     func save(_ email: String, name: String, image: Data?) {
         UserDefaults.standard.set(name, forKey: key(email) + ".name")
         UserDefaults.standard.set(image, forKey: key(email) + ".avatar")
+        revision += 1
+    }
+    func applyServerProfile(email: String?, name: String?, avatarData: String?) {
+        guard let email else { return }
+        if let name, Self.valid(name) { UserDefaults.standard.set(name, forKey: key(email) + ".name") }
+        if name != nil {
+            if let avatarData, let data = Data(base64Encoded: avatarData) { UserDefaults.standard.set(data, forKey: key(email) + ".avatar") }
+            else { UserDefaults.standard.removeObject(forKey: key(email) + ".avatar") }
+        }
         revision += 1
     }
 }
@@ -46,6 +67,7 @@ struct ProfileEditor: View {
     @State private var name = ""
     @State private var avatar: Data?
     @State private var message = ""
+    @State private var saving = false
     var body: some View {
         VStack(spacing: 18) {
             Text("编辑个人资料").font(.title3.bold())
@@ -59,21 +81,28 @@ struct ProfileEditor: View {
             TextField("用户名", text: $name).textFieldStyle(.roundedBorder)
             Text("最多 6 个中文或 12 个英文字母，可混合输入。")
                 .font(.caption).foregroundStyle(.secondary)
-            Text("资料保存在本机，按账号分别保存。") .font(.caption).foregroundStyle(.secondary)
+            Text("资料会同步保存到服务器，并在本机缓存。") .font(.caption).foregroundStyle(.secondary)
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.red) }
             HStack {
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("保存") {
-                    UserProfile.shared.save(email, name: name, image: avatar)
-                    dismiss()
-                }.buttonStyle(.borderedProminent).disabled(!UserProfile.valid(name))
+                    saving = true
+                    Task {
+                        do {
+                            try await SharedTrialAccount.shared.saveProfile(email: email, name: name, image: avatar)
+                            UserProfile.shared.save(email, name: name, image: avatar)
+                            dismiss()
+                        } catch { message = error.localizedDescription }
+                        saving = false
+                    }
+                }.buttonStyle(.borderedProminent).disabled(!UserProfile.valid(name) || saving)
             }
         }.padding(26).frame(width: 350)
         .onAppear {
             name = UserProfile.shared.name(email)
             if !UserProfile.valid(name) { name = "Yike用户" }
-            avatar = UserProfile.shared.avatar(email)?.tiffRepresentation
+            avatar = UserProfile.shared.cachedAvatar(email)
         }
     }
     private func chooseImage() {
@@ -83,11 +112,11 @@ struct ProfileEditor: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let image = NSImage(contentsOf: url), image.size.width > 0, image.size.height > 0 else { message = "无法读取图片，请选择其他图片。"; return }
         let side = min(image.size.width, image.size.height)
-        let result = NSImage(size: NSSize(width: 256, height: 256))
+        let result = NSImage(size: NSSize(width: 128, height: 128))
         result.lockFocus()
-        image.draw(in: NSRect(x: 0, y: 0, width: 256, height: 256), from: NSRect(x: (image.size.width-side)/2, y: (image.size.height-side)/2, width: side, height: side), operation: .copy, fraction: 1)
+        image.draw(in: NSRect(x: 0, y: 0, width: 128, height: 128), from: NSRect(x: (image.size.width-side)/2, y: (image.size.height-side)/2, width: side, height: side), operation: .copy, fraction: 1)
         result.unlockFocus()
-        guard let tiff = result.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let data = bitmap.representation(using: .png, properties: [:]) else { message = "图片处理失败，请重试。"; return }
+        guard let tiff = result.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.72]), data.count <= 20_000 else { message = "头像处理失败或图片过大，请重试。"; return }
         avatar = data; message = ""
     }
 }

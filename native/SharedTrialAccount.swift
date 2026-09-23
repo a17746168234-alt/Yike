@@ -7,6 +7,9 @@ struct TrialAccount: Codable {
     let granted: Int
     let used: Int
     let remaining: Int
+    let profileName: String?
+    let avatarData: String?
+    enum CodingKeys: String, CodingKey { case username, email, granted, used, remaining, profileName = "profile_name", avatarData = "avatar_data" }
 }
 struct TrialConfiguration: Decodable {
     let enabled: Bool
@@ -78,6 +81,7 @@ final class SharedTrialAccount: ObservableObject {
                 let response: Response = try await request("v1/me")
                 guard revision == authRevision else { return }
                 account = response.account
+                await synchronizeProfile(response.account)
             }
         } catch {
             guard revision == authRevision else { return }
@@ -91,6 +95,26 @@ final class SharedTrialAccount: ObservableObject {
     private func accept(_ response: AuthResponse) throws {
         try keychain.save(response.token)
         authRevision = UUID(); token = response.token; account = response.account; pendingRequests.removeAll()
+        feedback = response.message; feedbackIsError = false
+        Task { await synchronizeProfile(response.account) }
+    }
+
+    private func synchronizeProfile(_ remote: TrialAccount) async {
+        guard let email = remote.email else { return }
+        if remote.profileName == nil, let localName = UserProfile.shared.cachedName(email), UserProfile.valid(localName) {
+            try? await saveProfile(email: email, name: localName, image: UserProfile.shared.uploadAvatar(email))
+        } else {
+            UserProfile.shared.applyServerProfile(email: email, name: remote.profileName, avatarData: remote.avatarData)
+        }
+    }
+
+    func saveProfile(email: String, name: String, image: Data?) async throws {
+        guard isSignedIn, account?.email == email else { throw TrialServiceError(code: "login_required", message: "请先登录对应的 Yike 账号。") }
+        let encoded = image?.base64EncodedString()
+        guard (encoded?.count ?? 0) <= 28_000 else { throw TrialServiceError(code: "avatar", message: "头像过大，请重新选择图片。") }
+        struct Response: Decodable { let account: TrialAccount; let message: String }
+        let response: Response = try await request("v1/profile", method: "POST", body: ["profile_name": name, "avatar_data": encoded ?? NSNull()])
+        account = response.account
         feedback = response.message; feedbackIsError = false
     }
     func signIn(email: String, password: String) async {

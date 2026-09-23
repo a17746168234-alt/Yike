@@ -68,6 +68,7 @@ Build 67 移除旧验证页面、回调和服务端校验；启动时仅清理�
 | POST v2/bind/send | 旧会话 + email |
 | POST v2/bind/verify | 旧会话 + email、challenge_id、code；补齐总赠額，替换会话 |
 | GET v1/me | account包含email、username、granted、used、remaining |
+| POST v1/profile | 登录后保存 profile_name 与 avatar_data；昵称和压缩后的 JPEG/PNG 头像按账号写入数据库，GET v1/me 可读取 |
 | POST v1/logout | 撤销当前会话 |
 | POST v1/password | old_password、new_password；撤销全部会话 |
 | POST v1/translate | text字符串数组、source、target、request_id UUID |

@@ -158,7 +158,7 @@ struct SettingsSheet: View {
         .alert(updateAlertTitle, isPresented: $showUpdateResult) {
             if updateCheckResult == .available {
                 Button("暂不更新", role: .cancel) { }
-                Button("立即更新") { Task { await updater.installNow() } }
+                Button("立即更新") { dismiss(); Task { await updater.installNow() } }
             } else {
                 Button("知道了", role: .cancel) { }
             }
@@ -372,7 +372,9 @@ struct SettingsSheet: View {
                     }
                 }
                 .disabled(updater.isChecking)
-
+                if updater.showsInstallReady {
+                    Button("继续安装") { dismiss(); updater.showsProgress = true }
+                }
             }
         }
         settingsCard("联系 Yike", icon: "envelope") {

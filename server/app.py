@@ -1,5 +1,5 @@
 """Yike account and shared DeepL trial service. Python 3.11+, standard library only."""
-import contextlib, hashlib, hmac, http.server, json, os, re, secrets, sqlite3, threading, time, urllib.request, urllib.error, uuid
+import base64, binascii, contextlib, hashlib, hmac, http.server, json, os, re, secrets, sqlite3, threading, time, urllib.request, urllib.error, uuid
 from pathlib import Path
 from email_auth import EmailAuth
 from key_pool import DeepLKeyPool
@@ -22,13 +22,16 @@ class Service:
         with self.db() as db:
             db.executescript('''
             PRAGMA journal_mode=WAL;
-            CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, password TEXT NOT NULL, credit INTEGER NOT NULL, spent INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, password TEXT NOT NULL, credit INTEGER NOT NULL, spent INTEGER NOT NULL DEFAULT 0, profile_name TEXT, avatar_data TEXT);
             CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS limits(bucket TEXT NOT NULL, stamp INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS limits_bucket ON limits(bucket,stamp);
             CREATE TABLE IF NOT EXISTS pool(period TEXT PRIMARY KEY, spent INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS requests(user_id TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, status TEXT NOT NULL, result TEXT, cost INTEGER NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(user_id,request_id));
             ''')
+            columns = {row['name'] for row in db.execute('PRAGMA table_info(users)')}
+            if 'profile_name' not in columns: db.execute('ALTER TABLE users ADD COLUMN profile_name TEXT')
+            if 'avatar_data' not in columns: db.execute('ALTER TABLE users ADD COLUMN avatar_data TEXT')
             db.execute('BEGIN IMMEDIATE')
             for row in db.execute("SELECT user_id,SUM(cost) AS cost FROM requests WHERE status='pending' GROUP BY user_id").fetchall():
                 db.execute('UPDATE users SET spent=MAX(0,spent-?) WHERE id=?',(row['cost'],row['user_id']))
@@ -59,7 +62,7 @@ class Service:
             db.execute('INSERT INTO limits VALUES (?,?)',(bucket,now)); db.commit()
 
     def account(self, user):
-        return {'username':user['email'] or user['name'], 'email':user['email'], 'granted':user['credit'], 'used':user['spent'], 'remaining':max(0,user['credit']-user['spent']), 'grant_policy':'once'}
+        return {'username':user['email'] or user['name'], 'email':user['email'], 'granted':user['credit'], 'used':user['spent'], 'remaining':max(0,user['credit']-user['spent']), 'grant_policy':'once', 'profile_name':user['profile_name'], 'avatar_data':user['avatar_data']}
 
     def authenticate(self, token):
         if not isinstance(token,str) or len(token)>128: raise APIError(401,'login_required','请先登录 Yike 账号领取体验额度。')
@@ -209,6 +212,21 @@ class Service:
         if method=='GET' and path=='/v1/me':
             with self.db() as db: db.execute('UPDATE requests SET result=NULL WHERE created<?',(int(time.time())-600,))
             return {'account':self.account(user)}
+        if method=='POST' and path=='/v1/profile':
+            profile_name=body.get('profile_name')
+            avatar_data=body.get('avatar_data')
+            if not isinstance(profile_name,str) or not re.fullmatch(r'[A-Za-z\u3400-\u9FFF]{1,12}',profile_name) or sum(1 if ord(c)<128 else 2 for c in profile_name)>12:
+                raise APIError(400,'profile_name','昵称格式不正确。')
+            if avatar_data is not None:
+                if not isinstance(avatar_data,str) or len(avatar_data)>28000: raise APIError(400,'avatar','头像数据格式不正确或过大。')
+                try: image=base64.b64decode(avatar_data,validate=True)
+                except (ValueError,binascii.Error): raise APIError(400,'avatar','头像数据格式不正确。') from None
+                if len(image)>20000 or not (image.startswith(b'\xff\xd8\xff') or image.startswith(b'\x89PNG\r\n\x1a\n')):
+                    raise APIError(400,'avatar','请上传不超过 20 KB 的 JPEG 或 PNG 头像。')
+            with self.db() as db:
+                db.execute('UPDATE users SET profile_name=?,avatar_data=? WHERE id=?',(profile_name,avatar_data,user['id']))
+                saved=db.execute('SELECT * FROM users WHERE id=?',(user['id'],)).fetchone()
+            return {'account':self.account(saved),'message':'个人资料已同步到服务器。'}
         if method=='POST' and path=='/v1/logout':
             with self.db() as db: db.execute('DELETE FROM sessions WHERE hash=?',(self.digest(token),))
             return {'message':'已退出登录。'}

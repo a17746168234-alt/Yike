@@ -16,6 +16,52 @@ struct YikeUpdate: Codable, Equatable {
     }
 }
 
+struct YikeUpdateProgressView: View {
+    @ObservedObject var updater: UpdateManager
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Yike 更新").font(.title2.bold())
+            Text(updater.status).font(.subheadline)
+            if let progress = updater.downloadProgress {
+                ProgressView(value: progress)
+                Text("下载进度 \(Int(progress * 100))%")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if updater.isChecking { ProgressView() }
+            HStack {
+                Spacer()
+                if updater.showsInstallReady {
+                    Button("稍后再说") { updater.showsProgress = false }
+                    Button("退出并重启 Yike") { updater.restartAndInstall() }.buttonStyle(.borderedProminent)
+                } else if !updater.isChecking {
+                    Button("关闭") { updater.showsProgress = false }
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 390)
+    }
+}
+
+private final class YikeDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    let progressHandler: (Double) -> Void
+    var continuation: CheckedContinuation<(URL, HTTPURLResponse), Error>?
+    init(progressHandler: @escaping (Double) -> Void) { self.progressHandler = progressHandler }
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        guard totalBytesExpectedToWrite > 0 else { return }
+        progressHandler(min(1, max(0, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))))
+    }
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        guard let response = downloadTask.response as? HTTPURLResponse else { continuation?.resume(throwing: URLError(.badServerResponse)); return }
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("Yike-download-\(UUID().uuidString).dmg")
+        do { try FileManager.default.copyItem(at: location, to: target); continuation?.resume(returning: (target, response)) }
+        catch { continuation?.resume(throwing: error) }
+        continuation = nil
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error, continuation != nil { continuation?.resume(throwing: error); continuation = nil }
+    }
+}
+
 @MainActor
 final class UpdateManager: ObservableObject {
     static let shared = UpdateManager()
@@ -23,8 +69,13 @@ final class UpdateManager: ObservableObject {
     @Published private(set) var latest: YikeUpdate?
     @Published private(set) var isChecking = false
     @Published private(set) var status = ""
+    @Published private(set) var downloadProgress: Double?
     @Published var showsUpdateAlert = false
     @Published var showsInstallError = false
+    @Published var showsInstallReady = false
+    @Published var showsProgress = false
+    @Published var showsUpdateComplete = false
+    private var stagedDMG: URL?
 
     private let lastCheckKey = "yike.update.lastCheck"
     private let interval: TimeInterval = 24 * 60 * 60
@@ -36,6 +87,11 @@ final class UpdateManager: ObservableObject {
     var hasUpdate: Bool { (latest?.build ?? 0) > currentBuild }
 
     func checkIfNeeded() async {
+        let pending = UserDefaults.standard.integer(forKey: "yike.update.pendingBuild")
+        if pending > 0, currentBuild >= pending {
+            UserDefaults.standard.removeObject(forKey: "yike.update.pendingBuild")
+            showsUpdateComplete = true
+        }
         let last = UserDefaults.standard.double(forKey: lastCheckKey)
         guard Date().timeIntervalSince1970 - last >= interval else { return }
         _ = await check(force: false)
@@ -48,13 +104,25 @@ final class UpdateManager: ObservableObject {
     func installNow() async {
         guard let update = latest, !isChecking else { return }
         isChecking = true
+        showsInstallReady = false
+        if let stagedDMG { try? FileManager.default.removeItem(at: stagedDMG.deletingLastPathComponent()) }
+        stagedDMG = nil
+        showsProgress = true
+        downloadProgress = 0
         status = "正在下载新版…"
         defer { isChecking = false }
         do {
             let request = URLRequest(url: update.downloadURL, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 120)
-            let (temporaryURL, response) = try await URLSession.shared.download(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw URLError(.badServerResponse) }
+            let delegate = YikeDownloadDelegate { [weak self] value in Task { @MainActor in self?.downloadProgress = value } }
+            let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+            let (temporaryURL, response) = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(URL, HTTPURLResponse), Error>) in
+                delegate.continuation = continuation
+                session.downloadTask(with: request).resume()
+            }
+            session.invalidateAndCancel()
+            guard response.statusCode == 200 else { throw URLError(.badServerResponse) }
             let data = try Data(contentsOf: temporaryURL, options: .mappedIfSafe)
+            status = "正在校验安装包…"
             let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
             guard digest.caseInsensitiveCompare(update.sha256) == .orderedSame else { throw UpdateError.invalidChecksum }
 
@@ -62,21 +130,31 @@ final class UpdateManager: ObservableObject {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let dmg = directory.appendingPathComponent("Yike.dmg")
             try FileManager.default.copyItem(at: temporaryURL, to: dmg)
-            let helper = directory.appendingPathComponent("install.sh")
-            try Self.installerScript.write(to: helper, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
-
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = [helper.path, String(ProcessInfo.processInfo.processIdentifier), dmg.path,
-                                 Bundle.main.bundleURL.path, Bundle.main.bundleIdentifier ?? "com.yijian.translator.kimi"]
-            try process.run()
-            status = "正在安装，Yike 即将重新启动…"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { NSApp.terminate(nil) }
+            try? FileManager.default.removeItem(at: temporaryURL)
+            stagedDMG = dmg
+            downloadProgress = 1
+            status = "更新包下载并校验完成，可以退出并重启 Yike。"
+            showsInstallReady = true
         } catch {
+            downloadProgress = nil
             status = error is UpdateError ? "安装包校验失败，已保留当前版本。" : "更新失败，已保留当前版本，请稍后重试。"
             showsInstallError = true
         }
+    }
+
+    func restartAndInstall() {
+        guard let dmg = stagedDMG else { return }
+        do {
+            let directory = dmg.deletingLastPathComponent()
+            let helper = directory.appendingPathComponent("install.sh")
+            try Self.installerScript.write(to: helper, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
+            let process = Process(); process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = [helper.path, String(ProcessInfo.processInfo.processIdentifier), dmg.path, Bundle.main.bundleURL.path, Bundle.main.bundleIdentifier ?? "com.yijian.translator.kimi"]
+            try process.run(); status = "正在退出并重启 Yike…"
+            if let latest { UserDefaults.standard.set(latest.build, forKey: "yike.update.pendingBuild") }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { NSApp.terminate(nil) }
+        } catch { status = "无法启动重启流程，请重新下载更新。"; showsInstallError = true }
     }
 
     private func check(force: Bool) async -> CheckResult? {
@@ -125,10 +203,11 @@ old_pid="$1"
 dmg="$2"
 current_app="$3"
 expected_id="$4"
-for _ in {1..100}; do
+for _ in {1..300}; do
     kill -0 "$old_pid" 2>/dev/null || break
     sleep 0.1
 done
+if kill -0 "$old_pid" 2>/dev/null; then exit 1; fi
 mount_dir="$(mktemp -d /tmp/yike-update-mount.XXXXXX)" || exit 1
 backup_root="$(mktemp -d /tmp/yike-update-backup.XXXXXX)" || exit 1
 backup_app="$backup_root/Yike.app"
@@ -151,7 +230,6 @@ if ! /usr/bin/ditto "$new_app" "$current_app" || ! /usr/bin/codesign --verify --
     /usr/bin/osascript -e 'display dialog "Yike 更新失败，已恢复原版本。" buttons {"知道了"} with title "Yike 更新"' >/dev/null 2>&1 || true
     exit 1
 fi
-/usr/bin/osascript -e 'display dialog "Yike 更新完毕。点击“知道了”后将重新启动。" buttons {"知道了"} default button "知道了" with title "Yike 更新完成"' >/dev/null 2>&1 || true
 /usr/bin/open "$current_app"
 """#
 }
