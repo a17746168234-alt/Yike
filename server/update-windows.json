@@ -4,6 +4,6 @@
   "title": "Yike Windows 2.1",
   "notes": "新增真实的服务器更新清单与 GitHub 回退链路；改进高精度语音输入、动态波形、六秒静音自动发送、双翻译引擎选择、Windows 窗口控件、安装路径选择与可靠卸载，并优化完整安装包体积。",
   "download_url": "https://github.com/a17746168234-alt/Yike/releases/download/windows-v2.1.0/Yike-Setup.exe",
-  "sha256": "de049647f63a0b7644467faafd6e54606ebb725af2060b73030f2fbcf05df970",
-  "size": 266483712
+  "sha256": "525220fc445426605c2bc42d2958b43965376b35a2e46cd70f4a964e0210531e",
+  "size": 266484224
 }

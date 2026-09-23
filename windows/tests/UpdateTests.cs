@@ -40,6 +40,14 @@ internal static class UpdateTests {
 				requests++; Check(uri.AbsoluteUri == UpdateService.ServerManifestUrl, "default source does not read the first-party manifest"); return Task.FromResult(serverManifest);
 			});
 			Check(online.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().LatestVersion == new Version(2,1,0,0) && requests == 1, "stale bundled feed masks server release");
+			int repositoryRequests = 0;
+			UpdateService repositoryFallback = new UpdateService(root + "-repository", old, delegate(Uri uri, CancellationToken token) {
+				repositoryRequests++;
+				if (uri.AbsoluteUri == UpdateService.ServerManifestUrl) throw new HttpRequestException();
+				Check(uri.AbsoluteUri == UpdateService.RepositoryManifestUrl, "repository manifest fallback was skipped");
+				return Task.FromResult(serverManifest);
+			});
+			Check(repositoryFallback.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().CanInstall && repositoryRequests == 2, "repository manifest fallback failed");
 			UpdateService offline = new UpdateService(root, old, delegate { throw new HttpRequestException(); });
 			Check(!offline.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().Success, "offline check falsely reports latest");
 			using (CancellationTokenSource cancel = new CancellationTokenSource()) {
@@ -56,7 +64,7 @@ internal static class UpdateTests {
 			DownloadTests(old);
 			CheckWithoutUiDispatcher(json, old);
 		} finally { Directory.Delete(root, true); }
-		lines.Add("PASS: first-party manifest with GitHub fallback; two/three-part Windows tags; pagination; stale local feed ignored; offline/cancel never report latest; installer SHA-256 and size; failed/cancelled download cleanup; HTTPS custom feed retained; asynchronous updates do not depend on a UI dispatcher");
+		lines.Add("PASS: first-party and repository manifests with GitHub API fallback; two/three-part Windows tags; pagination; stale local feed ignored; offline/cancel never report latest; installer SHA-256 and size; failed/cancelled download cleanup; HTTPS custom feed retained; asynchronous updates do not depend on a UI dispatcher");
 	}
 	private static void CheckWithoutUiDispatcher(string json, Version old) {
 		Task check = Task.Run(delegate {

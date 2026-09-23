@@ -12,6 +12,7 @@ internal sealed class UpdateService {
 	internal const string ReleasesUrl = "https://github.com/a17746168234-alt/Yike/releases";
 	internal const string ApiUrl = "https://api.github.com/repos/a17746168234-alt/Yike/releases?per_page=100";
 	internal const string ServerManifestUrl = "https://n5v1b.cn/yike-api/v1/update/windows";
+	internal const string RepositoryManifestUrl = "https://raw.githubusercontent.com/a17746168234-alt/Yike/main/server/update-windows.json";
 	private const int MaximumFeedBytes = 2097152;
 	private readonly string baseDirectory;
 	private readonly Version currentVersion;
@@ -43,15 +44,17 @@ internal sealed class UpdateService {
 			}
 			// The first-party manifest carries an installer hash and size, making the
 			// in-app button independent from GitHub API availability and rate limits.
-			try {
-				string serverJson = await fetch(new Uri(ServerManifestUrl), token).ConfigureAwait(false);
-				token.ThrowIfCancellationRequested();
-				UpdateCheckResult serverResult = ParseServerManifest(serverJson, currentVersion);
-				if (serverResult.Success) return serverResult;
-			} catch (OperationCanceledException) {
-				throw;
-			} catch (Exception) {
-				// GitHub remains a safe fallback while the first-party service is offline.
+			foreach (string manifestUrl in new[] { ServerManifestUrl, RepositoryManifestUrl }) {
+				try {
+					string serverJson = await fetch(new Uri(manifestUrl), token).ConfigureAwait(false);
+					token.ThrowIfCancellationRequested();
+					UpdateCheckResult serverResult = ParseServerManifest(serverJson, currentVersion);
+					if (serverResult.Success) return serverResult;
+				} catch (OperationCanceledException) {
+					throw;
+				} catch (Exception) {
+					// Try the repository-hosted manifest, then the Releases API.
+				}
 			}
 			// Bundled metadata describes this installer, never the latest online release.
 			UpdateCheckResult newest = null;
