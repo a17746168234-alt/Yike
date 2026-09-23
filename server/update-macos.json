@@ -3,6 +3,6 @@
   "build": 77,
   "title": "Yike 2.5 Build 77 · 更新阶段与语音反馈",
   "notes": "更新流程分阶段显示下载完成、安装中、正在启动和更新完毕；安装失败保留重试入口。新版先显示主窗口和更新完成提示，再处理账号与密钥迁移，并说明首次迁移可能需要钥匙串授权。语音输入显示 3 秒静音倒计时并提供取消入口。",
-  "download_url": "https://github.com/a17746168234-alt/Yike/releases/download/v2.5/Yike-macOS-arm64.dmg",
+  "download_url": "https://n5v1b.cn/yike-download/Yike-macOS-arm64-v2.5-build77.dmg",
   "sha256": "1ece0ccbbaea70409d05ef88e1f5da33b9b8659bcb47a033ba411aeea5a0e333"
 }
