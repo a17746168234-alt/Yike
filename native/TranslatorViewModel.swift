@@ -1820,16 +1820,29 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 var heardSpeech = false
                 let started = Date()
                 var lastPreview = Date()
+                var noiseFloor = -55.0
+                var speechStarted: Date?
                 while !Task.isCancelled, self.voiceSession == id, self.isListening {
                     recorder.updateMeters()
                     let db = recorder.averagePower(forChannel: 0)
                     self.microphoneLevel = VoiceMeter.normalized(decibels: db)
-                    if db > -42 { heardSpeech = true; lastSound = Date() }
+                    let elapsed = Date().timeIntervalSince(started)
+                    if !heardSpeech && elapsed < 1.0 { noiseFloor = max(noiseFloor, Double(db)) }
+                    let speechThreshold = max(-38.0, noiseFloor + 10.0)
+                    if Double(db) >= speechThreshold {
+                        speechStarted = speechStarted ?? Date()
+                        if Date().timeIntervalSince(speechStarted!) >= 0.18 {
+                            heardSpeech = true
+                            lastSound = Date()
+                        }
+                    } else {
+                        speechStarted = nil
+                    }
                     if heardSpeech && Date().timeIntervalSince(lastPreview) >= 2 && self.partialVoiceTask == nil {
                         lastPreview = Date()
                         self.updateLocalPreview(id: id, file: file)
                     }
-                    if !recorder.isRecording || (heardSpeech && Date().timeIntervalSince(lastSound) >= 6) || (!heardSpeech && Date().timeIntervalSince(started) >= 6) {
+                    if !recorder.isRecording || (heardSpeech && Date().timeIntervalSince(lastSound) >= 3) || (!heardSpeech && Date().timeIntervalSince(started) >= 3) {
                         if heardSpeech { self.finishLocalRecording(id: id) }
                         else { self.cancelVoiceInput(); self.setInfo("没有听到清晰语音，请检查麦克风后再试。") }
                         return

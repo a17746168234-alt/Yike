@@ -148,7 +148,10 @@ actual_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$new_app/Co
 if ! /usr/bin/ditto "$new_app" "$current_app" || ! /usr/bin/codesign --verify --deep --strict "$current_app"; then
     /bin/rm -rf "$current_app"
     /usr/bin/ditto "$backup_app" "$current_app"
+    /usr/bin/osascript -e 'display dialog "Yike 更新失败，已恢复原版本。" buttons {"知道了"} with title "Yike 更新"' >/dev/null 2>&1 || true
+    exit 1
 fi
+/usr/bin/osascript -e 'display dialog "Yike 更新完毕。点击“知道了”后将重新启动。" buttons {"知道了"} default button "知道了" with title "Yike 更新完成"' >/dev/null 2>&1 || true
 /usr/bin/open "$current_app"
 """#
 }

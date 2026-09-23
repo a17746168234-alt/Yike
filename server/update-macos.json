@@ -1,8 +1,8 @@
 {
-  "version": "1.6",
-  "build": 69,
-  "title": "Yike 1.6 Build 69 · 自动更新",
-  "notes": "现在可在发现新版时选择暂不更新或立即更新。立即更新会校验安装包、覆盖当前版本并自动重新启动。",
-  "download_url": "https://github.com/a17746168234-alt/Yike/releases/latest/download/Yike-macOS-arm64.dmg",
-  "sha256": "60319c369ee297f447fdffd33940c2888812fc372f3ca4abe627ac24730751eb"
+  "version": "2.2",
+  "build": 73,
+  "title": "Yike 2.2 Build 73 · 语音与更新反馈",
+  "notes": "有效声音结束后连续 3 秒没有新的有效声音时，自动执行回车翻译；立即更新完成后显示“更新完毕”，随后退出并重新启动 Yike。",
+  "download_url": "https://github.com/a17746168234-alt/Yike/releases/download/v2.2/Yike-macOS-arm64.dmg",
+  "sha256": "700503a82620e669712bf2fb8a4b2e157a960a5616619e06124ee8d0d7fc6ffa"
 }

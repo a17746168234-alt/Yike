@@ -73,7 +73,12 @@ Unblock-File -Path "$env:USERPROFILE\Downloads\Yike-Setup.exe"
 
 打开 `outputs/Yike-macOS-arm64.dmg`，将「Yike」拖入 Applications。
 
-当前安装包为 **2.1（Build 72），Apple Silicon / arm64**。Apple 翻译需要 **macOS 15 或以上**，每台 Mac 首次使用需联网确认并下载对应语言包；安装包不包含语言包或 DeepL 密钥。本应用的 Apple 翻译不支持 Windows。个人 DeepL 需要用户自行设置 API Free 密钥；公共体验可在设置的“账号与安全”注册领取额度，服务开启状态以页面提示为准。
+当前安装包为 **2.2（Build 73），Apple Silicon / arm64**。Apple 翻译需要 **macOS 15 或以上**，每台 Mac 首次使用需联网确认并下载对应语言包；安装包不包含语言包或 DeepL 密钥。本应用的 Apple 翻译不支持 Windows。个人 DeepL 需要用户自行设置 API Free 密钥；公共体验可在设置的“账号与安全”注册领取额度，服务开启状态以页面提示为准。
+
+## v2.2 更新
+
+- 有效声音结束后连续 3 秒没有新的有效声音时，自动执行回车并翻译；主窗口与悬浮语音输入统一使用 3 秒静音结束条件。
+- 点击“立即更新”完成安装后显示“更新完毕”反馈，确认后自动退出并重新启动 Yike。
 
 ## v2.1 更新
 

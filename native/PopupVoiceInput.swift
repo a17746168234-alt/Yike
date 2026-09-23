@@ -11,7 +11,7 @@ final class PopupVoiceInput {
     private var session: UUID?
     private var hasTap = false
     private var completion: ((String?) -> Void)?
-    private let silenceTimeout: UInt64 = 6
+    private let silenceTimeout: UInt64 = 3
     private let silenceThreshold: Float = 0.015
 
     func start(onText: @escaping (String) -> Void, onFinish: @escaping (String?) -> Void) {
@@ -62,7 +62,7 @@ final class PopupVoiceInput {
                 finish(error: "无法启动麦克风，请稍后重试")
                 return
             }
-            // Finish after six seconds without meaningful microphone input.
+            // Finish after three seconds without meaningful microphone input.
             scheduleStop(after: silenceTimeout, id: id)
             recognition = recognizer.recognitionTask(with: audioRequest) { [weak self] result, error in
                 Task { @MainActor in
