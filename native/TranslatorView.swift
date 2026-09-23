@@ -72,6 +72,11 @@ struct TranslatorView: View {
 
             VStack(spacing: 0) {
                 header
+                if updater.showsUpdateComplete || updater.phase == .starting || updater.phase == .failed {
+                    updateStatusBanner
+                        .padding(.horizontal, 24)
+                        .padding(.top, 10)
+                }
                 translatorCard
                     .padding(.horizontal, 24)
                     .padding(.top, 20)
@@ -87,9 +92,20 @@ struct TranslatorView: View {
         .onAppear {
             migrateAppearanceIfNeeded()
             applyAppearance()
-            Task { await updater.checkIfNeeded() }
-            if model.hasDeepLKey {
-                Task { await model.fetchDeepLUsage() }
+            Task {
+                // SwiftUI's first onAppear can precede the AppKit window becoming key.
+                try? await Task.sleep(for: .seconds(1))
+                await updater.checkIfNeeded()
+                if updater.showsUpdateComplete { return }
+                try? await Task.sleep(for: .milliseconds(350))
+                model.loadKeyAfterLaunch()
+                trialAccount.restoreSessionAfterLaunch()
+            }
+        }
+        .onChange(of: updater.showsUpdateComplete) { presented in
+            if !presented {
+                model.loadKeyAfterLaunch()
+                trialAccount.restoreSessionAfterLaunch()
             }
         }
         .onChange(of: appearanceMode) { _ in applyAppearance() }
@@ -182,11 +198,26 @@ struct TranslatorView: View {
             YikeUpdateProgressView(updater: updater)
                 .interactiveDismissDisabled(updater.isChecking)
         }
-        .alert("Yike 更新完毕", isPresented: $updater.showsUpdateComplete) {
-            Button("知道了") { }
-        } message: {
-            Text("已安装并启动最新版本。")
+    }
+
+    private var updateStatusBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: updater.phase == .failed ? "exclamationmark.triangle" : "checkmark.circle.fill")
+            Text(updater.showsUpdateComplete
+                 ? "更新完毕。首次迁移账号或密钥时，macOS 可能请求钥匙串授权。"
+                 : updater.phase == .starting ? "正在启动 Yike…" : updater.status)
+                .font(.system(size: 12, weight: .medium))
+            Spacer(minLength: 8)
+            if updater.showsUpdateComplete {
+                Button("知道了") { updater.showsUpdateComplete = false }
+            } else if updater.phase == .failed {
+                Button("重试更新") { Task { await updater.retry() } }
+                    .disabled(updater.isChecking)
+            }
         }
+        .foregroundStyle(updater.phase == .failed ? Color(nsColor: .systemRed) : MacVisualTokens.accent)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var header: some View {
@@ -503,7 +534,9 @@ struct TranslatorView: View {
 
             if model.isListening || model.isVoiceProcessing {
                 VoiceInputBar(level: model.microphoneLevel, status: model.voiceInputStatus,
-                              isRecording: model.isListening, stop: model.stopListening)
+                              countdown: model.voiceSilenceCountdown,
+                              isRecording: model.isListening, stop: model.stopListening,
+                              cancel: model.cancelVoiceSubmission)
             } else {
             HStack(spacing: 12) {
                 HStack(spacing: 10) {

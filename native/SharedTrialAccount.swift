@@ -36,6 +36,7 @@ final class SharedTrialAccount: ObservableObject {
     @Published var feedbackIsError = false
     private var token = ""
     private var authRevision = UUID()
+    private var didRestoreSession = false
     private let secretStore = SecretTextStore(service: SecureKeyStore.applicationID + ".yike-account", account: "session", fileName: "account-session")
     private var pendingRequests: [Data: String] = [:]
     var isSignedIn: Bool { !token.isEmpty }
@@ -44,7 +45,14 @@ final class SharedTrialAccount: ObservableObject {
               let url = URL(string: value), url.scheme == "https", url.host != nil else { return nil }
         return url
     }
-    init() { token = (try? secretStore.load()) ?? "" }
+    func restoreSessionAfterLaunch() {
+        guard !didRestoreSession else { return }
+        didRestoreSession = true
+        token = (try? secretStore.load()) ?? ""
+        objectWillChange.send()
+        authRevision = UUID()
+        if isSignedIn { Task { await refresh() } }
+    }
 
     private func request<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil, authenticated: Bool = true) async throws -> T {
         guard let baseURL else { throw TrialServiceError(code: "not_configured", message: "此版本尚未配置公共体验服务，请更新 Yike。") }

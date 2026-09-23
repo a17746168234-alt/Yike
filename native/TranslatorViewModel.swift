@@ -50,6 +50,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     @Published private(set) var isVoiceProcessing = false
     @Published private(set) var microphoneLevel: Float = 0
     @Published private(set) var voiceInputStatus = "正在聆听…"
+    @Published private(set) var voiceSilenceCountdown: Int?
     @Published var history: [TranslationHistory] = []
     @Published private(set) var imageHistory: [ImageTranslationHistory] = []
     @Published var showSharedAccount = false
@@ -131,6 +132,8 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var silenceTask: Task<Void, Never>?
+    private var didLoadKeyAfterLaunch = false
+    private var autoSubmitAfterVoice = false
     private var speechBaseText = ""
     private var speechSentences: [String] = []
     private var lastRecognizedText = ""
@@ -177,8 +180,6 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
            let items = try? JSONDecoder().decode([GlossaryEntry].self, from: data) {
             glossary = items
         }
-        deepLAPIKey = SecureKeyStore.loadDeepLKey()
-        hasDeepLKey = !deepLAPIKey.isEmpty
         if let data = UserDefaults.standard.data(forKey: historyKey),
            let items = try? JSONDecoder().decode([TranslationHistory].self, from: data) {
             history = items
@@ -191,6 +192,14 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             }.prefix(10))
         }
         refreshSpeechCacheSize()
+    }
+
+    func loadKeyAfterLaunch() {
+        guard !didLoadKeyAfterLaunch else { return }
+        didLoadKeyAfterLaunch = true
+        deepLAPIKey = SecureKeyStore.loadDeepLKey()
+        hasDeepLKey = !deepLAPIKey.isEmpty
+        if hasDeepLKey { Task { await fetchDeepLUsage() } }
     }
 
     private func armAppleWatchdog(id: UUID, popup: Bool = false, seconds: Double = 45, stage: String = "启动系统翻译") {
@@ -1686,6 +1695,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     }
 
     @Published private(set) var popupVoiceActive = false
+    @Published private(set) var popupSilenceCountdown: Int?
     private let popupVoiceInput = PopupVoiceInput()
 
     func startPopupVoiceInput() {
@@ -1702,9 +1712,12 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         selectionPanelController.show(model: self, anchor: NSEvent.mouseLocation, sourceProcessID: nil)
         popupVoiceInput.start(onText: { [weak self] text in
             self?.popupSourceText = String(text.prefix(maxSourceCharacters))
+        }, onCountdown: { [weak self] seconds in
+            self?.popupSilenceCountdown = seconds
         }, onFinish: { [weak self] error in
             guard let self else { return }
             self.popupVoiceActive = false
+            self.popupSilenceCountdown = nil
             if let error {
                 self.popupNotice = AppNotice(kind: .error, message: error)
             } else if !self.popupSourceText.isEmpty {
@@ -1720,6 +1733,8 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
     func cancelPopupVoiceInput() {
         popupVoiceInput.cancel()
         popupVoiceActive = false
+        popupSilenceCountdown = nil
+        popupSourceText = ""
     }
 
     func toggleListening() {
@@ -1838,12 +1853,20 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                     } else {
                         speechStarted = nil
                     }
+                    let remaining = heardSpeech
+                        ? max(1, 3 - Int(Date().timeIntervalSince(lastSound))) : nil
+                    if self.voiceSilenceCountdown != remaining {
+                        self.voiceSilenceCountdown = remaining
+                    }
                     if heardSpeech && Date().timeIntervalSince(lastPreview) >= 2 && self.partialVoiceTask == nil {
                         lastPreview = Date()
                         self.updateLocalPreview(id: id, file: file)
                     }
                     if !recorder.isRecording || (heardSpeech && Date().timeIntervalSince(lastSound) >= 3) || (!heardSpeech && Date().timeIntervalSince(started) >= 3) {
-                        if heardSpeech { self.finishLocalRecording(id: id) }
+                        if heardSpeech {
+                            self.autoSubmitAfterVoice = true
+                            self.finishLocalRecording(id: id)
+                        }
                         else { self.cancelVoiceInput(); self.setInfo("没有听到清晰语音，请检查麦克风后再试。") }
                         return
                     }
@@ -1891,6 +1914,11 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         else { cancelVoiceInput() }
     }
 
+    func cancelVoiceSubmission() {
+        if sourceText == lastRecognizedText { sourceText = speechBaseText }
+        cancelVoiceInput()
+    }
+
     private func finishLocalRecording(id: UUID) {
         guard voiceSession == id, let recorder = voiceRecorder, let file = voiceAudioURL else { return }
         partialVoiceTask?.cancel()
@@ -1902,6 +1930,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         voiceMeterTask?.cancel()
         voiceMeterTask = nil
         isListening = false
+        voiceSilenceCountdown = nil
         microphoneLevel = 0
         guard duration > 0.4 else { cancelVoiceInput(); setInfo("录音太短，请说一句完整的话后再试。"); return }
         isVoiceProcessing = true
@@ -1919,6 +1948,10 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
                 self.voiceSession = nil
                 self.voiceAudioURL = nil
                 self.voiceInputStatus = "已识别：\(languageName(result.language))"
+                if self.autoSubmitAfterVoice {
+                    self.autoSubmitAfterVoice = false
+                    self.translate()
+                }
             } catch {
                 guard self.voiceSession == id, !Task.isCancelled else { return }
                 self.cancelVoiceInput()
@@ -1952,6 +1985,8 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         voiceAudioURL = nil
         silenceTask?.cancel()
         silenceTask = nil
+        voiceSilenceCountdown = nil
+        autoSubmitAfterVoice = false
         audioEngine.stop()
         if hasInputTap { audioEngine.inputNode.removeTap(onBus: 0); hasInputTap = false }
         recognitionRequest?.endAudio()
@@ -1993,7 +2028,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             Task { @MainActor in
                 guard let self, self.voiceSession == id else { return }
                 self.microphoneLevel = level
-                if db > -42 { self.scheduleAutomaticStop(after: 6, id: id) }
+                if db > -42 { self.scheduleAutomaticStop(after: 3, id: id) }
             }
         }
         hasInputTap = true
@@ -2003,7 +2038,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             isListening = true
             notice = nil
             voiceInputStatus = "正在聆听\(languageName(language))…"
-            scheduleAutomaticStop(after: 6, id: id)
+            scheduleAutomaticStop(after: 3, id: id)
         } catch {
             cancelVoiceInput(); setError("无法启动麦克风，请检查设备后重试。"); return
         }
@@ -2025,10 +2060,19 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
 
     private func scheduleAutomaticStop(after seconds: Double, id: UUID) {
         silenceTask?.cancel()
+        voiceSilenceCountdown = Int(seconds)
         silenceTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+            for remaining in stride(from: Int(seconds), through: 1, by: -1) {
+                guard let self, self.voiceSession == id, self.isListening else { return }
+                self.voiceSilenceCountdown = remaining
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
             guard let self, self.voiceSession == id, self.isListening else { return }
+            self.voiceSilenceCountdown = nil
             self.stopListening()
+            if !self.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                self.translate()
+            }
         }
     }
 

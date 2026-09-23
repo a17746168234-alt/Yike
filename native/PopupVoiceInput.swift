@@ -11,14 +11,16 @@ final class PopupVoiceInput {
     private var session: UUID?
     private var hasTap = false
     private var completion: ((String?) -> Void)?
+    private var countdown: ((Int?) -> Void)?
     private let silenceTimeout: UInt64 = 3
     private let silenceThreshold: Float = 0.015
 
-    func start(onText: @escaping (String) -> Void, onFinish: @escaping (String?) -> Void) {
+    func start(onText: @escaping (String) -> Void, onCountdown: @escaping (Int?) -> Void, onFinish: @escaping (String?) -> Void) {
         cancel()
         let id = UUID()
         session = id
         completion = onFinish
+        countdown = onCountdown
         Task {
             let status = await withCheckedContinuation { continuation in
                 SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
@@ -104,9 +106,13 @@ final class PopupVoiceInput {
 
     private func scheduleStop(after seconds: UInt64, id: UUID) {
         timeout?.cancel()
+        countdown?(Int(seconds))
         timeout = Task {
-            do { try await Task.sleep(nanoseconds: seconds * 1_000_000_000) }
-            catch { return }
+            for remaining in stride(from: Int(seconds), through: 1, by: -1) {
+                guard session == id else { return }
+                countdown?(remaining)
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
             guard session == id else { return }
             finish()
         }
@@ -123,6 +129,8 @@ final class PopupVoiceInput {
         session = nil
         timeout?.cancel()
         timeout = nil
+        countdown?(nil)
+        countdown = nil
         engine.stop()
         if hasTap { engine.inputNode.removeTap(onBus: 0); hasTap = false }
         request?.endAudio()

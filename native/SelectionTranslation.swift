@@ -267,7 +267,12 @@ struct SelectionTranslationPopup: View {
                 if model.popupVoiceActive {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("正在听，请说中文…", systemImage: "mic.fill")
+                        if let countdown = model.popupSilenceCountdown {
+                            Text("静音 \(countdown) 秒后翻译")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Button("完成并翻译", action: model.finishPopupVoiceInput)
+                        Button("取消", action: model.cancelPopupVoiceInput)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else if model.popupIsLoading {
