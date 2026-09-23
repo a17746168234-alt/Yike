@@ -51,7 +51,8 @@ internal sealed class UpdateService {
 					UpdateCheckResult serverResult = ParseServerManifest(serverJson, currentVersion);
 					if (serverResult.Success) return serverResult;
 				} catch (OperationCanceledException) {
-					throw;
+					if (token.IsCancellationRequested) throw;
+					// A timeout from one source must not prevent the next safe source.
 				} catch (Exception) {
 					// Try the repository-hosted manifest, then the Releases API.
 				}

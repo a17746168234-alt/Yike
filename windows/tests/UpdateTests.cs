@@ -48,6 +48,11 @@ internal static class UpdateTests {
 				return Task.FromResult(serverManifest);
 			});
 			Check(repositoryFallback.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().CanInstall && repositoryRequests == 2, "repository manifest fallback failed");
+			UpdateService timeoutFallback = new UpdateService(root + "-timeout", old, delegate(Uri uri, CancellationToken token) {
+				if (uri.AbsoluteUri == UpdateService.ServerManifestUrl) throw new TaskCanceledException("source timeout");
+				return Task.FromResult(serverManifest);
+			});
+			Check(timeoutFallback.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().CanInstall, "one source timeout aborted all update fallbacks");
 			UpdateService offline = new UpdateService(root, old, delegate { throw new HttpRequestException(); });
 			Check(!offline.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().Success, "offline check falsely reports latest");
 			using (CancellationTokenSource cancel = new CancellationTokenSource()) {

@@ -4,6 +4,6 @@
   "title": "Yike Windows 2.1",
   "notes": "新增真实的服务器更新清单与 GitHub 回退链路；改进高精度语音输入、动态波形、六秒静音自动发送、双翻译引擎选择、Windows 窗口控件、安装路径选择与可靠卸载。轻量安装包约 18 MB，首次安装单独下载并校验同一 Whisper small Q8 模型，更新时复用本机模型。",
   "download_url": "https://github.com/a17746168234-alt/Yike/releases/download/windows-v2.1.0/Yike-Setup.exe",
-  "sha256": "a67d4879205cc1020ec84a0628d75154e2b041828e5bd51bc47ac49025e0c6c3",
-  "size": 18792448
+  "sha256": "f6fb0246419f5cfa48b7cc9b0638e59b47cef1e063ba577c3c3e7da78a92a368",
+  "size": 18792960
 }
