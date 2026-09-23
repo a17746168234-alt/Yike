@@ -83,13 +83,17 @@ class Service:
             required=('version','build','title','notes','download_url','sha256')
             if any(key not in value for key in required): raise ValueError()
             if not isinstance(value['build'],int) or value['build']<1: raise ValueError()
-            if not value['download_url'].startswith('https://github.com/a17746168234-alt/Yike/releases/'): raise ValueError()
+            github_release=value['download_url'].startswith('https://github.com/a17746168234-alt/Yike/releases/')
             if not re.fullmatch(r'[0-9a-f]{64}',value['sha256']): raise ValueError()
             if platform=='windows':
                 if not re.fullmatch(r'\d+\.\d+(?:\.\d+){0,2}',value['version']): raise ValueError()
                 expected=f"https://github.com/a17746168234-alt/Yike/releases/download/windows-v{value['version']}/Yike-Setup.exe"
-                if value['download_url']!=expected or not isinstance(value.get('size'),int) or not 0<value['size']<=2147483648: raise ValueError()
+                if not github_release or value['download_url']!=expected or not isinstance(value.get('size'),int) or not 0<value['size']<=2147483648: raise ValueError()
                 required=required+('size',)
+            else:
+                if not re.fullmatch(r'\d+\.\d+(?:\.\d+)?',value['version']): raise ValueError()
+                mirror=f"https://n5v1b.cn/yike-download/Yike-macOS-arm64-v{value['version']}.dmg"
+                if not github_release and value['download_url']!=mirror: raise ValueError()
             return {key:value[key] for key in required}
         except Exception:
             raise APIError(503,'update_unavailable','暂时无法获取版本信息，请稍后重试。')
