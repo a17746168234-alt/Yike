@@ -1,5 +1,15 @@
 # Yike
+## 软件展示
 
+<p align="center">
+  <img src="截屏2026-09-23 16.43.27.png" width="48%">
+  <img src="截屏2026-09-23 16.43.39.png" width="48%">
+</p>
+
+<p align="center">
+  <img src="截屏2026-09-23 16.44.00.png" width="48%">
+  <img src="截屏2026-09-23 16.51.42.png" width="48%">
+</p>
 ## 平台版本
 
 | 平台 | 源码 | 使用与构建说明 |
