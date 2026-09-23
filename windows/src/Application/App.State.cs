@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -111,6 +111,9 @@ private readonly SpeechDraft voiceDraft = new SpeechDraft ();
 private bool applyingVoiceDraft;
 
 
+private bool sendVoiceAfterSilence;
+
+
 private DispatcherTimer spaceHoldTimer;
 
 
@@ -136,6 +139,9 @@ private bool previewMode;
 
 
 private Window activeSelectionPopup;
+
+
+private Popup enginePopup;
 
 
 private CancellationTokenSource activeSelectionCancel;

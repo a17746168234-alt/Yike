@@ -16,7 +16,7 @@ assets/
       edge_tts/
       ...Python 包及其 dist-info / 许可证
   whisper-runtime/
-    ggml-base-q5_1.bin
+    ggml-small-q8_0.bin
     LICENSE-whisper.cpp.txt
     LICENSE-openai-whisper.txt
     LICENSE-SDL2.txt
@@ -69,7 +69,7 @@ import site
 .\assets\speech-runtime\python.exe -c "import edge_tts; print(edge_tts.__version__)"
 ```
 
-保留 Python 的 LICENSE.txt 以及每个包的 dist-info / 许可证。edge-tts 的依赖由 pip 解析，后续准备时其间接依赖版本可能变化。发布时保存 pip 安装清单及实际组件版本，勿声称跨时间完全一致。详见 [edge-tts 源码](https://github.com/rany2/edge-tts)。
+依赖源目录保留 Python 的 LICENSE.txt 以及每个包的 dist-info / 许可证。edge-tts 的依赖由 pip 解析，后续准备时其间接依赖版本可能变化。发布构建会在第三方许可证已经随包保存的前提下，从最终运行目录移除不会在运行时读取的 `__pycache__` 和 dist-info 安装元数据，以减小体积；源依赖目录不受影响。发布时保存 pip 安装清单及实际组件版本，勿声称跨时间完全一致。详见 [edge-tts 源码](https://github.com/rany2/edge-tts)。
 
 ### 离线语音识别
 
@@ -87,7 +87,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Whisper 编译失败' }
 
 将构建产生的 whisper-stream.exe、whisper.dll、ggml DLL 及其依赖放入 `assets/whisper-runtime/Release/`，并复制 SDL2 开发包中 x64 的 SDL2.dll。Visual Studio 的 Release 输出通常在 `build/bin/Release/`，以实际构建结果为准；这些二进制必须来自兼容的同一构建。
 
-模型使用多语言 `ggml-base-q5_1.bin`。可从 [whisper.cpp 模型目录](https://huggingface.co/ggerganov/whisper.cpp/tree/main) 获取对应文件，或按上游说明下载多语言 base 模型并量化为 q5_1。放到 `assets/whisper-runtime/`。不要用仅英语的 base.en 模型替代。
+模型使用多语言 `ggml-small-q8_0.bin`。可从 [whisper.cpp 模型目录](https://huggingface.co/ggerganov/whisper.cpp/tree/main) 获取对应文件；官方 SHA-256 为 `49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f`。放到 `assets/whisper-runtime/`。不要用仅英语的 small.en 模型替代。实时识别需要 `whisper-stream.exe`，整段高精度校正还需要同一构建中的 `whisper-cli.exe`。
 
 将仓库 `third_party/licenses/` 内三个 Whisper / SDL2 许可证复制到运行库根目录，并保留第三方说明。构建和麦克风使用说明见 [上游 stream 文档](https://github.com/ggml-org/whisper.cpp/tree/v1.8.3/examples/stream)。
 

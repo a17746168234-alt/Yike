@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -83,7 +83,10 @@ private void BindMainWindowActions ()
 {
 	Border mainFrame = Find<Border> ("MainWindowFrame");
 	Action syncMainCorners = delegate {
-		mainFrame.CornerRadius = new CornerRadius ((window.WindowState != WindowState.Maximized) ? 32 : 0);
+		bool maximized = window.WindowState == WindowState.Maximized;
+		mainFrame.CornerRadius = new CornerRadius (maximized ? 0 : 32);
+		Find<TextBlock> ("MaximizeWindowGlyph").Text = maximized ? "\ue923" : "\ue922";
+		Find<System.Windows.Controls.Button> ("MaximizeWindowButton").ToolTip = maximized ? "还原" : "最大化";
 	};
 	window.StateChanged += delegate {
 		syncMainCorners ();
@@ -98,7 +101,7 @@ private void BindMainWindowActions ()
 	Button ("CloseWindowButton", delegate {
 		window.Close ();
 	});
-	SetButtonIcon ("EngineButton", "\ue774", "DeepL");
+	UpdateEngineButtonContent ();
 	SetButtonIcon ("HistoryButton", "\ue81c", "历史记录");
 	SetButtonIconOnly ("SettingsButton", "\ue713", "设置");
 	SetButtonIcon ("VoiceButton", "\ue720", "语音输入");

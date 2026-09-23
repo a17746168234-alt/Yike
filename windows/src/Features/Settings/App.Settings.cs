@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -106,7 +106,8 @@ private void ShowSettings (bool preview, string initialPage)
 	border.Width = 48.0;
 	border.Height = 48.0;
 	border.CornerRadius = new CornerRadius (12.0);
-	border.Background = OverlayBrush ("#F2F7FA");
+	border.SetResourceReference (Border.BackgroundProperty, "SurfaceBrush");
+	border.Tag = "settings-app-icon-tile";
 	border.Margin = new Thickness (0.0, 0.0, 14.0, 0.0);
 	Border border2 = border;
 	System.Windows.Controls.Image image = new System.Windows.Controls.Image ();
@@ -206,7 +207,7 @@ private void ShowSettings (bool preview, string initialPage)
 	pages ["account"] = BuildAccountSettingsPage (preview);
 	titles ["account"] = new string[2] { "账号与安全", "注册、登录并管理公共翻译额度" };
 	pages ["deepl"] = BuildDeepLSettingsPage (preview);
-	titles ["deepl"] = new string[2] { "DeepL 密钥与帮助", "管理翻译服务与用量" };
+	titles ["deepl"] = new string[2] { "了解与帮助", "了解翻译引擎、信息处理方式与个人接入" };
 	StackPanel cards = new StackPanel ();
 	Action cleanupSpeech = BuildSpeechCard (cards);
 	pages ["speech"] = SettingsPage (cards);
@@ -230,7 +231,7 @@ private void ShowSettings (bool preview, string initialPage)
 	pages ["about"] = BuildAboutPage ();
 	titles ["about"] = new string[2] { "关于与更新", "认识 Yike，了解本次更新" };
 	Action<string> action = delegate(string key) {
-		
+
 		if (!pages.ContainsKey (key)) key = "appearance";
 		pageHost.Content = pages [key];
 		title.Text = titles [key] [0];
@@ -243,7 +244,7 @@ private void ShowSettings (bool preview, string initialPage)
 	};
 	AddSettingsNav (stackPanel6, navButtons, "appearance", "\ue790", "外观", action);
 	AddSettingsNav (stackPanel6, navButtons, "account", "\ue77b", "账号与安全", action);
-	AddSettingsNav (stackPanel6, navButtons, "deepl", "\ue72e", "DeepL 密钥与帮助", action);
+	AddSettingsNav (stackPanel6, navButtons, "deepl", "\ue8f1", "了解与帮助", action);
 	AddSettingsNav (stackPanel6, navButtons, "speech", "\ue767", "在线朗读", action);
 	AddSettingsNav (stackPanel6, navButtons, "shortcuts", "\ue765", "快捷键与语音输入", action);
 	AddSettingsNav (stackPanel6, navButtons, "permissions", "\ue72e", "权限状态", action);
@@ -404,7 +405,7 @@ private UIElement BuildShortcutPage ()
 		Foreground = OverlayBrush ("#EDF2F3"),
 		TextWrapping = TextWrapping.Wrap
 	});
-	TextBlock textBlock = Label ("先点击原文输入框再按住空格说话；短按空格仍输入空格，可在已有文字后追加。也可以点击主界面的“语音输入”。正常说话后若连续 2 秒没有检测到声音，会自动停止。自动检测使用 Whisper，指定语言使用已安装的 Windows 识别组件。", true);
+	TextBlock textBlock = Label ("先点击原文输入框再按住空格说话；短按空格仍输入空格，可在已有文字后追加。也可以点击主界面的“语音输入”。正常说话后若连续 6 秒没有检测到声音，会自动停止、完成整段高精度校正并发送翻译。自动检测、中文、English 及其他指定语言均使用本机高精度 Whisper。", true);
 	textBlock.Margin = new Thickness (0.0, 13.0, 0.0, 0.0);
 	stackPanel3.Children.Add (textBlock);
 	return SettingsPage (stackPanel);
@@ -450,7 +451,7 @@ private UIElement BuildAboutPage ()
 	StackPanel stackPanel = new StackPanel ();
 	StackPanel stackPanel2 = Card (stackPanel, "\ue946", "关于与更新");
 	stackPanel2.Children.Add (new TextBlock {
-		Text = "当前安装版本  Yike for Windows · " + typeof(App).Assembly.GetName ().Version.ToString (3),
+		Text = "当前安装版本  Yike for Windows · " + DisplayVersion (typeof(App).Assembly.GetName ().Version),
 		FontSize = 16.0,
 		Foreground = OverlayBrush ("#EDF2F3"),
 		Margin = new Thickness (0.0, 0.0, 0.0, 10.0)
@@ -464,7 +465,7 @@ private UIElement BuildAboutPage ()
 	stackPanel2.Children.Add (Label ("文字、截图与图片翻译工具。版本号来自正在运行的程序；GitHub 发布新版后，需要下载并安装才能更新本机。", true));
 	StackPanel stackPanel3 = Card (stackPanel, "\ue895", "检查更新");
 	DockPanel dockPanel = new DockPanel ();
-	TextBlock updateStatus = Label ("从 GitHub 检查 Windows 稳定版，不混用 macOS 版本。", true);
+	TextBlock updateStatus = Label ("从 Yike 更新服务器检查 Windows 稳定版，服务不可用时自动回退 GitHub。", true);
 	System.Windows.Controls.Button check = null;
 	check = OverlayButton ("检查更新", async delegate {
 		await CheckForUpdatesAsync (check, updateStatus);
@@ -639,8 +640,8 @@ private void BuildPermissionCard (StackPanel cards)
 	StackPanel parent = Card (cards, "\ue72e", "系统与权限");
 	TextBlock hotkey = PermissionRow (parent, "划词翻译", selectionHotkeyRegistered ? "Ctrl+Shift+F 已注册" : "快捷键未注册，请到快捷键页重试", null);
 	TextBlock microphone = PermissionRow (parent, "麦克风", "点击刷新检测设备", "ms-settings:privacy-microphone");
-	TextBlock offline = PermissionRow (parent, "自动语音输入", WhisperSpeechInput.IsAvailable ? "Whisper 模型与运行库已就绪" : "缺少 Whisper 模型或运行库，请安装完整版本", null);
-	TextBlock recognizers = PermissionRow (parent, "指定语言语音输入", "点击刷新检查识别组件", "ms-settings:speech");
+	TextBlock offline = PermissionRow (parent, "语音输入", WhisperSpeechInput.IsAvailable ? "高精度 Whisper 模型与运行库已就绪" : "缺少 Whisper 模型或运行库，请安装完整版本", null);
+	TextBlock recognizers = PermissionRow (parent, "识别模式", "自动检测与所有指定语言均使用 Whisper", null);
 	TextBlock ocr = PermissionRow (parent, "OCR 语言组件", "点击刷新检查已安装语言", "ms-settings:regionlanguage");
 	TextBlock refreshed = Label ("设备检测不录音；麦克风访问是否成功以实际启动结果为准。", true);
 	parent.Children.Add (refreshed);
@@ -650,9 +651,9 @@ private void BuildPermissionCard (StackPanel cards)
 		refreshed.Text = "正在检测本机组件…";
 		try {
 			hotkey.Text = selectionHotkeyRegistered ? "Ctrl+Shift+F 已注册" : "快捷键未注册，请到快捷键页重试";
-			offline.Text = WhisperSpeechInput.IsAvailable ? "Whisper 模型与运行库已就绪" : "缺少 Whisper 模型或运行库，请安装完整版本";
+			offline.Text = WhisperSpeechInput.IsAvailable ? "高精度 Whisper 模型与运行库已就绪" : "缺少 Whisper 模型或运行库，请安装完整版本";
 			microphone.Text = await Task.Run (() => RuntimeStatus.Microphone ());
-			recognizers.Text = await Task.Run (() => RuntimeStatus.Recognizers ());
+			recognizers.Text = "自动检测与所有指定语言均使用 Whisper";
 			ocr.Text = await OcrService.InstalledLanguages ();
 			refreshed.Text = "已检测 " + DateTime.Now.ToString ("HH:mm:ss") + " · 麦克风访问以实际启动结果为准。";
 		} catch (Exception) { refreshed.Text = "部分组件无法检测，请打开对应系统设置确认后重试。"; }

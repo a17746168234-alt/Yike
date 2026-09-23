@@ -63,7 +63,17 @@ private void BindVoiceInput ()
 	};
 	voiceInput.Recognized += delegate(string text) {
 		PostVoiceEvent (delegate {
-			ApplyVoiceDraft (text, true);
+			bool applied = ApplyVoiceDraft (text, true);
+			if (sendVoiceAfterSilence && !voiceInput.IsListening) {
+				sendVoiceAfterSilence = false;
+				voiceDraft.Cancel ();
+				if (ShouldAutoSubmitVoiceResult (true, false, applied, input.Text)) {
+					Status ("连续 6 秒无声音 · 正在自动发送翻译");
+					Translate ();
+				} else {
+					Status ("语音输入已停止，但没有可发送的识别结果");
+				}
+			}
 		});
 	};
 	voiceInput.AudioLevelChanged += delegate(int level) {
@@ -79,14 +89,16 @@ private void BindVoiceInput ()
 	};
 	voiceInput.Failed += delegate(string message) {
 		PostVoiceEvent (delegate {
+			sendVoiceAfterSilence = false;
 			ResetVoiceIndicator ();
 			Status ("语音输入失败：" + message + " · 可手动按 Win+H 使用系统语音输入");
 		});
 	};
 	voiceInput.AutoStopped += delegate {
 		PostVoiceEvent (delegate {
+			sendVoiceAfterSilence = true;
 			ResetVoiceIndicator ();
-			Status ("语音输入已自动停止 · 连续 2 秒未检测到声音");
+			Status ("连续 6 秒未检测到声音 · 正在整理识别结果并自动发送");
 		});
 	};
 	Button ("VoiceButton", delegate {
@@ -200,6 +212,7 @@ private void OnVoiceDocumentChanged ()
 
 private void CancelVoiceDraft ()
 {
+	sendVoiceAfterSilence = false;
 	if (voiceDraft.Active) {
 		voiceInput.Cancel ();
 		voiceDraft.Cancel ();
@@ -208,7 +221,7 @@ private void CancelVoiceDraft ()
 }
 
 
-private void ApplyVoiceDraft (string text, bool final)
+private bool ApplyVoiceDraft (string text, bool final)
 {
 	string updated;
 	int caret;
@@ -222,12 +235,23 @@ private void ApplyVoiceDraft (string text, bool final)
 		}
 		string text2 = SpeechText.LanguageLabel (text);
 		Status ((!final) ? ("正在识别 · " + text2) : (voiceInput.IsListening ? ("语音输入中 · 已识别 " + text2) : ("语音已输入 · " + text2)));
+		return true;
 	}
+	return false;
+}
+
+
+internal static bool ShouldAutoSubmitVoiceResult (bool stoppedBySilence, bool isListening, bool finalApplied, string text)
+{
+	return stoppedBySilence && !isListening && finalApplied && !string.IsNullOrWhiteSpace (text);
 }
 
 
 private void ResetVoiceIndicator ()
 {
+	if (voiceWaveform != null) {
+		voiceWaveform.Dispose ();
+	}
 	voiceWaveform = null;
 	SetButtonIcon ("VoiceButton", "\ue720", "语音输入");
 }
@@ -235,6 +259,7 @@ private void ResetVoiceIndicator ()
 
 private void StopVoiceInput (string message)
 {
+	sendVoiceAfterSilence = false;
 	voiceInput.Stop ();
 	ResetVoiceIndicator ();
 	Status (message);
@@ -243,6 +268,7 @@ private void StopVoiceInput (string message)
 
 private bool StartApplicationVoice (string tooltip)
 {
+	sendVoiceAfterSilence = false;
 	BeginVoiceDraft ();
 	voiceReady = false;
 	if (!voiceInput.Start (Code (source))) {

@@ -24,7 +24,7 @@ DPAPI 只保护密钥等加密数据，不代表历史文字、图片和缓存�
 | 离线语音识别 | 本机 Whisper 运行库及模型 |
 | 在线自然语音 | Microsoft 在线语音服务，发送朗读文本 |
 | 本机朗读 | Windows 已安装的语音 |
-| 在线更新检查 | 点击检查更新时请求本项目 GitHub Releases，只查询 Windows 稳定版；选择下载并安装时下载公开安装包并校验大小和 SHA-256。不发送翻译内容、密钥或历史。自定义 update-source.txt 仍只支持 HTTPS |
+| 在线更新检查 | 点击检查更新时先请求 Yike 服务器的 Windows 版本清单，失败时回退本项目 GitHub Releases；选择下载并安装时仅从受信任的 GitHub Release 下载公开安装包，并校验大小和 SHA-256。不发送翻译内容、密钥或历史。自定义 update-source.txt 仍只支持 HTTPS |
 
 用户配置代理后部分网络请求会经过该代理。在线自然语音脚本在代理连接失败时会尝试直连。
 

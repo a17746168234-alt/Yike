@@ -89,6 +89,12 @@ class EmailTests(unittest.TestCase):
         manifest.write_text('{"version":"1.6","build":69,"title":"Yike 1.6","notes":"test","download_url":"https://github.com/a17746168234-alt/Yike/releases/latest/download/Yike-macOS-arm64.dmg","sha256":"'+'a'*64+'"}')
         self.service.update_path=manifest
         self.assertEqual(self.service.dispatch('GET','/v1/update/macos',{},'',self.ip)['build'],69)
+        windows=Path(self.temp.name)/'update-windows.json'
+        windows.write_text('{"version":"2.1.0","build":210,"title":"Yike Windows 2.1","notes":"test","download_url":"https://github.com/a17746168234-alt/Yike/releases/download/windows-v2.1.0/Yike-Setup.exe","sha256":"'+'b'*64+'","size":123}',encoding='utf-8')
+        self.service.windows_update_path=windows
+        self.assertEqual(self.service.dispatch('GET','/v1/update/windows',{},'',self.ip)['size'],123)
+        windows.write_text(windows.read_text().replace('windows-v2.1.0','v2.1.0'),encoding='utf-8')
+        self.error('update_unavailable',lambda:self.service.dispatch('GET','/v1/update/windows',{},'',self.ip))
         manifest.write_text('{}')
         self.error('update_unavailable',lambda:self.service.dispatch('GET','/v1/update/macos',{},'',self.ip))
     def test_migration_removes_only_challenge_table_and_preserves_accounts(self):

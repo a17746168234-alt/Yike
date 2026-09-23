@@ -10,10 +10,11 @@ class APIError(Exception):
 
 class Service:
     def __init__(self, path, pepper, key='', enabled=False, gift=200000, pool_limit=4000000, upstream=None, mailer=None,
-                 update_path='/opt/yike-trial/update-macos.json'):
+                 update_path='/opt/yike-trial/update-macos.json', windows_update_path='/opt/yike-trial/update-windows.json'):
         self.path, self.pepper, self.key = str(path), pepper.encode(), key
         self.enabled, self.gift, self.pool_limit = enabled, gift, pool_limit
         self.update_path = Path(update_path)
+        self.windows_update_path = Path(windows_update_path)
         self.upstream = upstream or self.deepl
         self.translation_lock = threading.BoundedSemaphore(2)
         self.auth_slots = threading.BoundedSemaphore(2)
@@ -72,14 +73,20 @@ class Service:
             pool=db.execute("SELECT spent FROM pool WHERE period='total'").fetchone()
         return {'pool_limit':self.pool_limit,'pool_remaining':max(0,self.pool_limit-(pool[0] if pool else 0)), 'enabled':self.enabled and bool(self.key), 'gift':self.gift, 'grant_policy':'once', 'message':'注册后一次领取体验字符，使用受公共池剩余额度限制。' if self.enabled and self.key else '公共翻译尚未开启，可先注册账号；Apple 翻译与自填密钥不受影响。'}
 
-    def update_config(self):
+    def update_config(self, platform):
         try:
-            value=json.loads(self.update_path.read_text())
+            path=self.windows_update_path if platform=='windows' else self.update_path
+            value=json.loads(path.read_text(encoding='utf-8'))
             required=('version','build','title','notes','download_url','sha256')
             if any(key not in value for key in required): raise ValueError()
             if not isinstance(value['build'],int) or value['build']<1: raise ValueError()
             if not value['download_url'].startswith('https://github.com/a17746168234-alt/Yike/releases/'): raise ValueError()
             if not re.fullmatch(r'[0-9a-f]{64}',value['sha256']): raise ValueError()
+            if platform=='windows':
+                if not re.fullmatch(r'\d+\.\d+(?:\.\d+){0,2}',value['version']): raise ValueError()
+                expected=f"https://github.com/a17746168234-alt/Yike/releases/download/windows-v{value['version']}/Yike-Setup.exe"
+                if value['download_url']!=expected or not isinstance(value.get('size'),int) or not 0<value['size']<=2147483648: raise ValueError()
+                required=required+('size',)
             return {key:value[key] for key in required}
         except Exception:
             raise APIError(503,'update_unavailable','暂时无法获取版本信息，请稍后重试。')
@@ -194,7 +201,8 @@ class Service:
             raise APIError(410,'upgrade_required','人机验证已移除，请更新 Yike 后直接登录或注册。')
         if method=='GET' and path=='/health': return {'ok':True}
         if method=='GET' and path=='/v1/config': return self.config()
-        if method=='GET' and path=='/v1/update/macos': return self.update_config()
+        if method=='GET' and path=='/v1/update/macos': return self.update_config('macos')
+        if method=='GET' and path=='/v1/update/windows': return self.update_config('windows')
         if method=='POST' and path.startswith('/v2/'): return self.email_auth.dispatch(path,body,token,ip)
         if method=='POST' and path in ('/v1/register','/v1/login'): raise APIError(426,'upgrade_required','请更新 Yike，使用邮箱验证注册或登录。')
         user=self.authenticate(token)

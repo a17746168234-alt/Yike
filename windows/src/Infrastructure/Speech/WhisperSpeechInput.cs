@@ -40,9 +40,11 @@ using Microsoft.Win32;
 namespace WindowsTranslator {
 internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 {
-	public const int StepMilliseconds = 600;
+	public const int StepMilliseconds = 1000;
 
-	public const int WindowMilliseconds = 2400;
+	public const int WindowMilliseconds = 8000;
+
+	public const int KeepMilliseconds = 500;
 
 	private readonly object sync = new object ();
 
@@ -55,6 +57,10 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 	private Process process;
 
 	private ProcessJob processJob;
+
+	private Process refinementProcess;
+
+	private ProcessJob refinementJob;
 
 	private Task completion;
 
@@ -80,6 +86,12 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 	private long lastAudio;
 
 	private string lastError = "";
+
+	private string language = "auto";
+
+	private string recordingDirectory;
+
+	private string lastLiveText = "";
 
 	public bool IsListening {
 		get {
@@ -115,15 +127,21 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 		}
 	}
 
+	public static string CliPath {
+		get {
+			return System.IO.Path.Combine (RuntimeRoot, "Release", "whisper-cli.exe");
+		}
+	}
+
 	public static string ModelPath {
 		get {
-			return System.IO.Path.Combine (RuntimeRoot, "ggml-base-q5_1.bin");
+			return System.IO.Path.Combine (RuntimeRoot, "ggml-small-q8_0.bin");
 		}
 	}
 
 	public static bool IsAvailable {
 		get {
-			if (File.Exists (ExecutablePath)) {
+			if (File.Exists (ExecutablePath) && File.Exists (CliPath)) {
 				return File.Exists (ModelPath);
 			}
 			return false;
@@ -155,6 +173,42 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 		parser.Text += Publish;
 	}
 
+	internal static string LanguageCode (string value)
+	{
+		if (string.IsNullOrWhiteSpace (value) || string.Equals (value.Trim (), "auto", StringComparison.OrdinalIgnoreCase)) {
+			return "auto";
+		}
+		string text = value.Trim ().Split ('-') [0].ToLowerInvariant ();
+		return Regex.IsMatch (text, "^[a-z]{2}$") ? text : "auto";
+	}
+
+	internal static string StreamingArguments (string value)
+	{
+		return "-m " + Quote (ModelPath) + " -l " + LanguageCode (value) +
+			" --step " + StepMilliseconds + " --length " + WindowMilliseconds +
+			" --keep " + KeepMilliseconds + " -mt 64 -bs 3 -kc -t " + ThreadCount + " -ng -sa";
+	}
+
+	internal static string RefinementArguments (string value, string audioPath)
+	{
+		string languageCode = LanguageCode (value);
+		string prompt = languageCode == "zh" ? "以下是清晰、自然的简体中文口述。" :
+			(languageCode == "en" ? "The following is clear, natural English dictation." : "以下是自然的中英文口述。 Clear Chinese and English dictation.");
+		return "-m " + Quote (ModelPath) + " -f " + Quote (audioPath) + " -l " + LanguageCode (value) +
+			" -bs 8 -bo 8 -t " + ThreadCount + " -ng -np -nt -sns --prompt " + Quote (prompt);
+	}
+
+	private static int ThreadCount {
+		get {
+			return Math.Max (2, Math.Min (8, Environment.ProcessorCount / 2));
+		}
+	}
+
+	private static string Quote (string value)
+	{
+		return "\"" + (value ?? "").Replace ("\"", "\\\"") + "\"";
+	}
+
 	public bool Start (out string error)
 	{
 		return Start ("auto", out error);
@@ -168,16 +222,21 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 			return false;
 		}
 		try {
+			this.language = LanguageCode (language);
+			if (createHelper == null) {
+				recordingDirectory = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "Yike-voice-" + Guid.NewGuid ().ToString ("N"));
+				Directory.CreateDirectory (recordingDirectory);
+			}
 			ProcessStartInfo processStartInfo = new ProcessStartInfo ();
 			processStartInfo.FileName = ExecutablePath;
-			processStartInfo.WorkingDirectory = System.IO.Path.GetDirectoryName (ExecutablePath);
+			processStartInfo.WorkingDirectory = recordingDirectory ?? System.IO.Path.GetDirectoryName (ExecutablePath);
 			processStartInfo.UseShellExecute = false;
 			processStartInfo.CreateNoWindow = true;
 			processStartInfo.RedirectStandardOutput = true;
 			processStartInfo.RedirectStandardError = true;
 			processStartInfo.StandardOutputEncoding = Encoding.UTF8;
 			processStartInfo.StandardErrorEncoding = Encoding.UTF8;
-			processStartInfo.Arguments = "-m \"..\\ggml-base-q5_1.bin\" -l auto --step " + StepMilliseconds + " --length " + WindowMilliseconds + " --keep 0 -ac 256 -t " + Math.Max (2, Math.Min (6, Environment.ProcessorCount / 2)) + " -ng -nf";
+			processStartInfo.Arguments = StreamingArguments (this.language);
 			ProcessStartInfo startInfo = processStartInfo;
 			if (createHelper != null) startInfo = createHelper ();
 			lock (sync) {
@@ -211,47 +270,204 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 
 	private async Task Run (Process active)
 	{
-		int num = default(int);
-		int num2 = num;
-		int num3 = 0;
 		try {
-			int num4 = num;
-			int num5 = 0;
+			Task output = ReadOutput (active);
+			Task errors = ReadErrors (active);
+			await Task.WhenAll (output, errors).ConfigureAwait (false);
+			active.WaitForExit ();
+		} catch (Exception ex) {
+			lock (sync) {
+				lastError = ex.Message;
+			}
+		}
+		bool refine = false;
+		lock (sync) {
+			if (!disposed) {
+				parser.Complete ();
+				refine = createHelper == null && stopping && heardAudio;
+			}
+		}
+		if (refine) {
+			string refinedText = await RefineRecording ().ConfigureAwait (false);
+			if (string.IsNullOrWhiteSpace (refinedText)) {
+				lock (sync) {
+					refinedText = lastLiveText;
+				}
+			}
+			PublishFinal (refinedText);
+		}
+		string text = null;
+		ProcessJob processJob;
+		lock (sync) {
+			if (!disposed) {
+				if (!stopping) {
+					text = (string.IsNullOrWhiteSpace (lastError) ? "离线识别已中断，请检查麦克风或重新安装应用。" : lastError);
+				} else if (heardAudio && !receivedText) {
+					text = "未识别到清晰语音，请靠近麦克风后重试。";
+				}
+			}
+			listening = false;
+			ReleasePolling ();
+			if (stopGuard != null) { stopGuard.Dispose (); stopGuard = null; }
+			processJob = this.processJob;
+			this.processJob = null;
+			if (process == active) {
+				process = null;
+			}
+		}
+		active.Dispose ();
+		if (processJob != null) {
+			processJob.Dispose ();
+		}
+		if (text != null && this.Failed != null) {
+			this.Failed (text);
+		}
+		CleanupRecordingDirectory ();
+	}
+
+	private async Task<string> RefineRecording ()
+	{
+		string directory;
+		lock (sync) {
+			if (disposed) {
+				return "";
+			}
+			directory = recordingDirectory;
+		}
+		try {
+			string audioPath = Directory.GetFiles (directory, "*.wav").OrderByDescending (File.GetLastWriteTimeUtc).FirstOrDefault ();
+			if (string.IsNullOrWhiteSpace (audioPath) || !RepairWaveHeader (audioPath)) {
+				return "";
+			}
+			string enhancedPath;
+			if (WaveAudioEnhancer.TryEnhance (audioPath, out enhancedPath)) {
+				audioPath = enhancedPath;
+			}
+			ProcessStartInfo info = new ProcessStartInfo {
+				FileName = CliPath,
+				WorkingDirectory = System.IO.Path.GetDirectoryName (CliPath),
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				StandardOutputEncoding = Encoding.UTF8,
+				StandardErrorEncoding = Encoding.UTF8,
+				Arguments = RefinementArguments (language, audioPath)
+			};
+			Process active = Process.Start (info);
+			if (active == null) {
+				return "";
+			}
+			ProcessJob job = null;
 			try {
-				Task output = ReadOutput (active);
-				Task errors = ReadErrors (active);
+				job = ProcessJob.AttachOrTerminate (active);
+				lock (sync) {
+					if (disposed) {
+						return "";
+					}
+					refinementProcess = active;
+					refinementJob = job;
+				}
+				Task<string> output = active.StandardOutput.ReadToEndAsync ();
+				Task<string> errors = active.StandardError.ReadToEndAsync ();
 				await Task.WhenAll (output, errors).ConfigureAwait (false);
 				active.WaitForExit ();
-			} catch (Exception ex) {
-				lock (sync) {
-					lastError = ex.Message;
+				if (active.ExitCode != 0) {
+					return "";
 				}
-			}
-		} finally {
-			string text = null;
-			ProcessJob processJob;
-			lock (sync) {
-				if (!disposed) {
-					parser.Complete ();
-					if (!stopping) {
-						text = (string.IsNullOrWhiteSpace (lastError) ? "离线识别已中断，请检查麦克风或重新安装应用。" : lastError);
-					} else if (heardAudio && !receivedText) {
-						text = "未识别到清晰语音，请靠近麦克风后重试。";
+				string combined = "";
+				foreach (string line in output.Result.Split (new char[2] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)) {
+					string cleaned = Clean (line);
+					if (cleaned.Length > 0) {
+						combined += SpeechText.Insertion (combined, cleaned, "");
 					}
 				}
-				listening = false;
-				ReleasePolling ();
-				if (stopGuard != null) { stopGuard.Dispose (); stopGuard = null; }
-				processJob = this.processJob;
-				this.processJob = null;
+				return combined.Trim ();
+			} finally {
+				lock (sync) {
+					if (refinementProcess == active) refinementProcess = null;
+					if (refinementJob == job) refinementJob = null;
+				}
+				if (job != null) job.Dispose ();
+				active.Dispose ();
 			}
-			active.Dispose ();
-			if (processJob != null) {
-				processJob.Dispose ();
+		} catch (Exception ex) {
+			lock (sync) {
+				if (!disposed) lastError = ex.Message;
 			}
-			if (text != null && this.Failed != null) {
-				this.Failed (text);
+			return "";
+		}
+	}
+
+	private void PublishFinal (string text)
+	{
+		Action<string> handler = null;
+		lock (sync) {
+			if (!disposed && !string.IsNullOrWhiteSpace (text)) {
+				receivedText = true;
+				handler = this.Recognized;
 			}
+		}
+		if (handler != null) {
+			handler (text);
+		}
+	}
+
+	internal static bool RepairWaveHeader (string path)
+	{
+		try {
+			using (FileStream stream = new FileStream (path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read)) {
+				if (stream.Length < 44) return false;
+				byte[] header = new byte[12];
+				if (stream.Read (header, 0, header.Length) != header.Length || Encoding.ASCII.GetString (header, 0, 4) != "RIFF" || Encoding.ASCII.GetString (header, 8, 4) != "WAVE") return false;
+				long offset = 12;
+				long dataSizeOffset = -1;
+				long dataOffset = -1;
+				byte[] chunk = new byte[8];
+				while (offset + 8 <= stream.Length) {
+					stream.Position = offset;
+					if (stream.Read (chunk, 0, chunk.Length) != chunk.Length) break;
+					uint size = BitConverter.ToUInt32 (chunk, 4);
+					if (Encoding.ASCII.GetString (chunk, 0, 4) == "data") {
+						dataSizeOffset = offset + 4;
+						dataOffset = offset + 8;
+						break;
+					}
+					offset += 8L + size + (size & 1u);
+				}
+				if (dataOffset < 0 || dataOffset >= stream.Length) return false;
+				using (BinaryWriter writer = new BinaryWriter (stream, Encoding.ASCII, true)) {
+					stream.Position = 4;
+					writer.Write ((uint)Math.Min (uint.MaxValue, stream.Length - 8));
+					stream.Position = dataSizeOffset;
+					writer.Write ((uint)Math.Min (uint.MaxValue, stream.Length - dataOffset));
+					writer.Flush ();
+				}
+				return true;
+			}
+		} catch (IOException) {
+			return false;
+		} catch (UnauthorizedAccessException) {
+			return false;
+		}
+	}
+
+	private void CleanupRecordingDirectory ()
+	{
+		string directory;
+		lock (sync) {
+			directory = recordingDirectory;
+			recordingDirectory = null;
+		}
+		if (string.IsNullOrWhiteSpace (directory)) return;
+		try {
+			string full = System.IO.Path.GetFullPath (directory).TrimEnd (System.IO.Path.DirectorySeparatorChar);
+			string temp = System.IO.Path.GetFullPath (System.IO.Path.GetTempPath ()).TrimEnd (System.IO.Path.DirectorySeparatorChar);
+			if (string.Equals (System.IO.Path.GetDirectoryName (full), temp, StringComparison.OrdinalIgnoreCase) && Regex.IsMatch (System.IO.Path.GetFileName (full), "^Yike-voice-[0-9a-f]{32}$", RegexOptions.IgnoreCase)) {
+				Directory.Delete (full, true);
+			}
+		} catch (IOException) {
+		} catch (UnauthorizedAccessException) {
 		}
 	}
 
@@ -288,8 +504,9 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 		if (disposed || !heardAudio) {
 			return;
 		}
+		lastLiveText = text;
 		receivedText = true;
-		if (final) {
+		if (final && createHelper != null) {
 			if (this.Recognized != null) {
 				this.Recognized (text);
 			}
@@ -310,8 +527,8 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 			long elapsedMilliseconds = elapsed.ElapsedMilliseconds;
 			try {
 				int level = readLevel == null ? meter.Read () : readLevel ();
-				if (level > 0) { heardAudio = true; lastAudio = elapsedMilliseconds; }
-				if (ready && this.AudioLevelChanged != null) this.AudioLevelChanged (level);
+				if (level >= 2) { heardAudio = true; lastAudio = elapsedMilliseconds; }
+				if (this.AudioLevelChanged != null) this.AudioLevelChanged (level);
 			} catch (Exception ex) {
 				text = "无法读取麦克风音量：" + ex.Message;
 			}
@@ -323,7 +540,7 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 				try {
 					parser.Preview ();
 					flag2 = !heardAudio;
-					flag = (flag2 ? (elapsedMilliseconds - readyAt >= 8000) : (elapsedMilliseconds - lastAudio >= 2000));
+					flag = (flag2 ? (elapsedMilliseconds - readyAt >= SpeechInput.StartupSilenceMilliseconds) : (elapsedMilliseconds - lastAudio >= SpeechInput.SilenceMilliseconds));
 				} catch (Exception ex) {
 					text = "无法读取麦克风音量：" + ex.Message;
 				}
@@ -404,6 +621,8 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 	{
 		Process process;
 		ProcessJob processJob;
+		Process refinementProcess;
+		ProcessJob refinementJob;
 		lock (sync) {
 			if (disposed) {
 				return;
@@ -414,19 +633,34 @@ internal sealed class WhisperSpeechInput : ISpeechInputBackend, IDisposable
 			process = this.process;
 			processJob = this.processJob;
 			this.processJob = null;
+			refinementProcess = this.refinementProcess;
+			this.refinementProcess = null;
+			refinementJob = this.refinementJob;
+			this.refinementJob = null;
 			ReleasePolling ();
 			if (stopGuard != null) { stopGuard.Dispose (); stopGuard = null; }
 		}
 		if (processJob != null) {
 			processJob.Dispose ();
 		}
+		if (refinementJob != null) {
+			refinementJob.Dispose ();
+		}
 		Terminate (process);
+		Terminate (refinementProcess);
 		if (process != null) {
 			try {
 				process.WaitForExit (2000);
 			} catch (InvalidOperationException) {
 			}
 		}
+		if (refinementProcess != null) {
+			try {
+				refinementProcess.WaitForExit (2000);
+			} catch (InvalidOperationException) {
+			}
+		}
+		CleanupRecordingDirectory ();
 	}
 }
 

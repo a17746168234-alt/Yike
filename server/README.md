@@ -59,6 +59,7 @@ Build 67 移除旧验证页面、回调和服务端校验；启动时仅清理�
 | --- | --- |
 | GET v1/config | enabled、gift、pool_limit、pool_remaining |
 | GET v1/update/macos | 最新版本、Build、说明、下载地址与 SHA-256；无需登录 |
+| GET v1/update/windows | Windows 最新版本、说明、GitHub 安装包地址、SHA-256 与文件大小；无需登录 |
 | POST v2/login | email、password；返回token/account/message |
 | POST v2/register/send | email、password；返回challenge_id/message，无账号或赠额 |
 | POST v2/register/verify | email、challenge_id、code；验证后返回token/account/message |

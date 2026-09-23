@@ -75,24 +75,26 @@ internal static class DialogChrome
 		grid.RowDefinitions.Add (new RowDefinition ());
 		Grid grid2 = new Grid ();
 		grid2.Background = System.Windows.Media.Brushes.Transparent;
-		grid2.Margin = new Thickness (17.0, 0.0, 17.0, 0.0);
+		grid2.Margin = new Thickness (0.0);
 		Grid grid3 = grid2;
 		grid3.ColumnDefinitions.Add (new ColumnDefinition {
-			Width = new GridLength (96.0)
+			Width = new GridLength (138.0)
 		});
 		grid3.ColumnDefinitions.Add (new ColumnDefinition ());
 		grid3.ColumnDefinitions.Add (new ColumnDefinition {
-			Width = new GridLength (96.0)
+			Width = new GridLength (138.0)
 		});
 		grid.Children.Add (grid3);
 		StackPanel stackPanel = new StackPanel ();
 		stackPanel.Orientation = System.Windows.Controls.Orientation.Horizontal;
 		stackPanel.VerticalAlignment = VerticalAlignment.Center;
+		stackPanel.HorizontalAlignment = System.Windows.HorizontalAlignment.Right;
 		StackPanel stackPanel2 = stackPanel;
+		Grid.SetColumn (stackPanel2, 2);
 		grid3.Children.Add (stackPanel2);
-		System.Windows.Controls.Button button = TrafficButton ("#FF5F57", "关闭", "close");
-		System.Windows.Controls.Button button2 = TrafficButton ("#FFBD2E", "最小化", "minimize");
-		System.Windows.Controls.Button button3 = TrafficButton ("#28C840", "最大化 / 还原", "maximize");
+		System.Windows.Controls.Button button = CaptionButton ("\ue921", "最小化", "minimize", false);
+		System.Windows.Controls.Button button2 = CaptionButton ("\ue922", "最大化", "maximize", false);
+		System.Windows.Controls.Button button3 = CaptionButton ("\ue8bb", "关闭", "close", true);
 		stackPanel2.Children.Add (button);
 		stackPanel2.Children.Add (button2);
 		stackPanel2.Children.Add (button3);
@@ -129,13 +131,13 @@ internal static class DialogChrome
 		dialog.Content = frame;
 		dialog.Tag = body;
 		button.Click += delegate {
-			dialog.Close ();
-		};
-		button2.Click += delegate {
 			dialog.WindowState = WindowState.Minimized;
 		};
-		button3.Click += delegate {
+		button2.Click += delegate {
 			ToggleMaximize (dialog);
+		};
+		button3.Click += delegate {
+			dialog.Close ();
 		};
 		grid3.MouseLeftButtonDown += delegate(object s, MouseButtonEventArgs e) {
 			if (IsInteractiveSource (e.OriginalSource as DependencyObject, grid3)) return;
@@ -154,6 +156,7 @@ internal static class DialogChrome
 		};
 		dialog.StateChanged += delegate {
 			frame.CornerRadius = new CornerRadius ((dialog.WindowState == WindowState.Maximized) ? 0.0 : radius);
+			SetMaximizeGlyph (button2, dialog.WindowState == WindowState.Maximized);
 		};
 		return dialog;
 	}
@@ -194,20 +197,44 @@ internal static class DialogChrome
 		}
 	}
 
-	private static System.Windows.Controls.Button TrafficButton (string color, string tooltip, string role)
+	private static System.Windows.Controls.Button CaptionButton (string glyph, string tooltip, string role, bool close)
 	{
-		System.Windows.Controls.Button button = new System.Windows.Controls.Button ();
-		button.Width = 14.0;
-		button.Height = 14.0;
-		button.Margin = new Thickness (0.0, 0.0, 8.0, 0.0);
-		button.Padding = new Thickness (0.0);
-		button.Background = new SolidColorBrush ((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString (color));
-		button.BorderBrush = new SolidColorBrush ((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString ("#40FFFFFF"));
-		button.BorderThickness = new Thickness (1.0);
-		button.ToolTip = tooltip;
-		button.Tag = "dialog-traffic-" + role;
-		button.Cursor = System.Windows.Input.Cursors.Hand;
+		System.Windows.Controls.Button button = new System.Windows.Controls.Button {
+			Width = 46.0,
+			Height = 48.0,
+			Padding = new Thickness (0.0),
+			Margin = new Thickness (0.0),
+			Background = System.Windows.Media.Brushes.Transparent,
+			BorderThickness = new Thickness (0.0),
+			ToolTip = tooltip,
+			Tag = "dialog-caption-" + role,
+			Cursor = System.Windows.Input.Cursors.Arrow,
+			Content = new TextBlock {
+				Text = glyph,
+				FontFamily = new System.Windows.Media.FontFamily ("Segoe Fluent Icons"),
+				FontSize = 10.0,
+				HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+				VerticalAlignment = VerticalAlignment.Center
+			}
+		};
+		button.SetResourceReference (System.Windows.Controls.Control.ForegroundProperty, "InkBrush");
+		button.Template = (ControlTemplate)XamlReader.Parse ("<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Button'><Border Background='{TemplateBinding Background}'><ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/></Border></ControlTemplate>");
+		button.MouseEnter += delegate {
+			button.Background = close ? new SolidColorBrush (System.Windows.Media.Color.FromRgb (232, 17, 35)) : (button.TryFindResource ("ControlBrush") as System.Windows.Media.Brush ?? new SolidColorBrush (System.Windows.Media.Color.FromArgb (24, 128, 140, 160)));
+			if (close) button.Foreground = System.Windows.Media.Brushes.White;
+		};
+		button.MouseLeave += delegate {
+			button.Background = System.Windows.Media.Brushes.Transparent;
+			button.SetResourceReference (System.Windows.Controls.Control.ForegroundProperty, "InkBrush");
+		};
 		return button;
+	}
+
+	private static void SetMaximizeGlyph (System.Windows.Controls.Button button, bool maximized)
+	{
+		TextBlock glyph = button.Content as TextBlock;
+		if (glyph != null) glyph.Text = maximized ? "\ue923" : "\ue922";
+		button.ToolTip = maximized ? "还原" : "最大化";
 	}
 
 	private static void ToggleMaximize (Window dialog)

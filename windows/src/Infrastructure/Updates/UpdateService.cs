@@ -11,6 +11,7 @@ namespace WindowsTranslator {
 internal sealed class UpdateService {
 	internal const string ReleasesUrl = "https://github.com/a17746168234-alt/Yike/releases";
 	internal const string ApiUrl = "https://api.github.com/repos/a17746168234-alt/Yike/releases?per_page=100";
+	internal const string ServerManifestUrl = "https://n5v1b.cn/yike-api/v1/update/windows";
 	private const int MaximumFeedBytes = 2097152;
 	private readonly string baseDirectory;
 	private readonly Version currentVersion;
@@ -40,6 +41,18 @@ internal sealed class UpdateService {
 				token.ThrowIfCancellationRequested();
 				return Parse(manifest, currentVersion);
 			}
+			// The first-party manifest carries an installer hash and size, making the
+			// in-app button independent from GitHub API availability and rate limits.
+			try {
+				string serverJson = await fetch(new Uri(ServerManifestUrl), token).ConfigureAwait(false);
+				token.ThrowIfCancellationRequested();
+				UpdateCheckResult serverResult = ParseServerManifest(serverJson, currentVersion);
+				if (serverResult.Success) return serverResult;
+			} catch (OperationCanceledException) {
+				throw;
+			} catch (Exception) {
+				// GitHub remains a safe fallback while the first-party service is offline.
+			}
 			// Bundled metadata describes this installer, never the latest online release.
 			UpdateCheckResult newest = null;
 			for (int page = 1; page <= 5; page++) {
@@ -50,11 +63,11 @@ internal sealed class UpdateService {
 				GitHubRelease[] releases = Store.Json.Deserialize<GitHubRelease[]>(json);
 				if (releases.Length < 100) break;
 			}
-			return newest ?? UpdateCheckResult.Failed(currentVersion, "GitHub 上尚未找到带安装包的 Windows 稳定版，可打开发布页查看。");
+			return newest ?? UpdateCheckResult.Failed(currentVersion, "更新服务器和 GitHub 均未找到可用的 Windows 稳定版。");
 		} catch (OperationCanceledException) {
 			return UpdateCheckResult.Failed(currentVersion, token.IsCancellationRequested ? "检查更新已取消" : "连接更新服务超时，请检查网络后重试。");
 		} catch (Exception) {
-			return UpdateCheckResult.Failed(currentVersion, "无法连接 GitHub 更新服务，请检查网络或代理后重试；此次未确认是否为最新版。");
+			return UpdateCheckResult.Failed(currentVersion, "无法连接更新服务器或 GitHub，请检查网络或代理后重试；此次未确认是否为最新版。");
 		}
 	}
 
@@ -97,7 +110,7 @@ internal sealed class UpdateService {
 			foreach (GitHubRelease release in releases ?? new GitHubRelease[0]) {
 				Version version;
 				if (release == null || release.draft || release.prerelease || release.tag_name == null ||
-					!Regex.IsMatch(release.tag_name, @"^windows-v\d+\.\d+\.\d+(\.\d+)?$") ||
+					!Regex.IsMatch(release.tag_name, @"^windows-v\d+\.\d+(\.\d+){0,2}$") ||
 					!Version.TryParse(release.tag_name.Substring(9), out version)) continue;
 				version = NormalizeVersion(version);
 				string pageUrl = ReleasesUrl + "/tag/" + release.tag_name;
@@ -117,6 +130,27 @@ internal sealed class UpdateService {
 
 	internal static Version NormalizeVersion(Version version) {
 		return new Version(version.Major, version.Minor, Math.Max(0, version.Build), Math.Max(0, version.Revision));
+	}
+
+	internal static UpdateCheckResult ParseServerManifest(string json, Version current) {
+		try {
+			if (string.IsNullOrWhiteSpace(json) || json.Length > MaximumFeedBytes) throw new InvalidDataException();
+			ServerUpdateManifest manifest = Store.Json.Deserialize<ServerUpdateManifest>(json);
+			Version version; Uri download;
+			if (manifest == null || !Version.TryParse(manifest.version, out version) || manifest.build < 1 ||
+				string.IsNullOrWhiteSpace(manifest.title) || string.IsNullOrWhiteSpace(manifest.notes) ||
+				!Uri.TryCreate(manifest.download_url, UriKind.Absolute, out download) || download.Scheme != "https" ||
+				!Regex.IsMatch(manifest.sha256 ?? "", @"^[a-fA-F0-9]{64}$") || manifest.size <= 0 || manifest.size > 2147483648L)
+				return UpdateCheckResult.Failed(current, "服务器版本清单无效。");
+			string tag = "windows-v" + manifest.version;
+			string expected = ReleasesUrl + "/download/" + tag + "/Yike-Setup.exe";
+			if (!string.Equals(download.AbsoluteUri, expected, StringComparison.Ordinal))
+				return UpdateCheckResult.Failed(current, "服务器安装包地址不受信任。");
+			return UpdateCheckResult.Found(NormalizeVersion(current), NormalizeVersion(version), download.AbsoluteUri,
+				manifest.notes, ReleasesUrl + "/tag/" + tag, manifest.sha256.ToLowerInvariant(), manifest.size);
+		} catch (Exception) {
+			return UpdateCheckResult.Failed(current, "服务器版本清单无法解析。");
+		}
 	}
 
 	internal static UpdateCheckResult Parse(string json, Version currentVersion) {

@@ -24,7 +24,7 @@ public partial class App {
 				RenderTargetBitmap image = new RenderTargetBitmap((int)content.ActualWidth,(int)content.ActualHeight,96,96,PixelFormats.Pbgra32);
 				image.Render(content); ImageFiles.Save(image,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ui-"+page+"-"+prefs.Appearance+".png"));
 			}
-			UiCheck(UiDescendants(first.Content as DependencyObject).OfType<TextBlock>().Any(t=>t.Text.Contains("当前安装版本") && t.Text.Contains(typeof(App).Assembly.GetName().Version.ToString(3))), "About version doesn't come from running assembly");
+			UiCheck(typeof(App).Assembly.GetName().Version == new Version(2,1,0,0) && UiDescendants(first.Content as DependencyObject).OfType<TextBlock>().Any(t=>t.Text.Contains("当前安装版本") && t.Text.Contains("2.1") && !t.Text.Contains("2.1.0")), "About version isn't the running 2.1 assembly");
 			RemoteAccountSession savedSession=remoteSession; bool savedPreviewMode=previewMode;
 			try {
 				previewMode=false;
@@ -53,7 +53,7 @@ public partial class App {
 			UiCheck(refresh.IsEnabled && UiDescendants(root).OfType<TextBlock>().Any(t=>t.Text.StartsWith("已检测 ")),"component refresh didn't finish");
 			first.Close();
 			SelectionError("close button test"); Window popup=activeSelectionPopup;
-			((System.Windows.Controls.Button)popup.FindName("ClosePopupButton")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+			((System.Windows.Controls.Button)popup.FindName("ClosePopup")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
 			UiCheck(!popup.IsVisible && activeSelectionPopup==null,"top-right selection close doesn't close and clear active popup");
 			Grid header=new Grid(); System.Windows.Controls.Button button=new System.Windows.Controls.Button(); TextBlock glyph=new TextBlock { Text="×" }; button.Content=glyph; header.Children.Add(button);
 			UiCheck(DialogChrome.IsInteractiveSource(glyph,header),"button text can trigger title drag");

@@ -19,10 +19,14 @@ internal static class UpdateTests {
 	}
 	public static void Run(List<string> lines) {
 		Version old = new Version(1, 2, 0, 0);
+		string serverManifest = "{\"version\":\"2.1.0\",\"build\":210,\"title\":\"Yike Windows 2.1\",\"notes\":\"test\",\"download_url\":\"" + UpdateService.ReleasesUrl + "/download/windows-v2.1.0/Yike-Setup.exe\",\"sha256\":\"" + new string('b',64) + "\",\"size\":3}";
+		UpdateCheckResult fromServer = UpdateService.ParseServerManifest(serverManifest, old);
+		Check(fromServer.Success && fromServer.LatestVersion == new Version(2,1,0,0) && fromServer.CanInstall && fromServer.Size == 3, "first-party Windows manifest was not installable");
 		string json = Store.Json.Serialize(new[] { Release("v2.0-build71"), Release("windows-v1.2.1"), Release("windows-v1.2.3"),
 			Release("windows-v9.0.0", true), Release("windows-v8.0.0", false, true), Release("windows-v7.0.0", false, false, "starter") });
 		UpdateCheckResult result = UpdateService.ParseGitHubReleases(json, old);
 		Check(result.Success && result.LatestVersion == new Version(1,2,3,0) && result.UpdateAvailable && result.CanInstall, "Windows release filtering/max version failed");
+		Check(UpdateService.ParseGitHubReleases(Store.Json.Serialize(new[] { Release("windows-v2.1") }), old).LatestVersion == new Version(2,1,0,0), "two-part Windows release tags are ignored");
 		Check(!UpdateService.ParseGitHubReleases(json, new Version(1,2,3)).UpdateAvailable, "3/4 component versions differ");
 		Check(!UpdateService.ParseGitHubReleases("{}", old).Success && !UpdateService.ParseGitHubReleases("[]", old).Success, "invalid/empty releases accepted");
 		Check(!UpdateService.ParseGitHubReleases(json.Replace("https://github.com/", "https://example.com/"), old).Success, "foreign installer URL accepted");
@@ -33,9 +37,9 @@ internal static class UpdateTests {
 			File.WriteAllText(Path.Combine(root, "update-feed.json"), "{\"Version\":\"1.2.0.0\",\"DownloadUrl\":\"https://example.com\"}");
 			int requests = 0;
 			UpdateService online = new UpdateService(root, old, delegate(Uri uri, CancellationToken token) {
-				requests++; Check(uri.Host == "api.github.com", "default source does not read GitHub"); return Task.FromResult(json);
+				requests++; Check(uri.AbsoluteUri == UpdateService.ServerManifestUrl, "default source does not read the first-party manifest"); return Task.FromResult(serverManifest);
 			});
-			Check(online.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().UpdateAvailable && requests == 1, "stale bundled feed masks newer release");
+			Check(online.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().LatestVersion == new Version(2,1,0,0) && requests == 1, "stale bundled feed masks server release");
 			UpdateService offline = new UpdateService(root, old, delegate { throw new HttpRequestException(); });
 			Check(!offline.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().Success, "offline check falsely reports latest");
 			using (CancellationTokenSource cancel = new CancellationTokenSource()) {
@@ -47,12 +51,12 @@ internal static class UpdateTests {
 			UpdateService custom = new UpdateService(root, old, delegate { return Task.FromResult("{\"Version\":\"1.2.4\",\"DownloadUrl\":\"https://example.com\"}"); });
 			Check(custom.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().LatestVersion == new Version(1,2,4,0), "custom HTTPS source stopped working");
 			object[] many = Enumerable.Range(0,100).Select(i=>Release("v2.0-build"+i)).ToArray();
-			UpdateService pages = new UpdateService(root + "-missing", old, delegate(Uri uri, CancellationToken token) { return Task.FromResult(uri.Query.Contains("page=2") ? json : Store.Json.Serialize(many)); });
+			UpdateService pages = new UpdateService(root + "-missing", old, delegate(Uri uri, CancellationToken token) { if (uri.AbsoluteUri == UpdateService.ServerManifestUrl) throw new HttpRequestException(); return Task.FromResult(uri.Query.Contains("page=2") ? json : Store.Json.Serialize(many)); });
 			Check(pages.CheckAsync(CancellationToken.None).GetAwaiter().GetResult().UpdateAvailable, "Windows release on second page was lost");
 			DownloadTests(old);
 			CheckWithoutUiDispatcher(json, old);
 		} finally { Directory.Delete(root, true); }
-		lines.Add("PASS: GitHub Windows-only stable releases; latest semantic version; pagination; stale local feed ignored; offline/cancel never report latest; installer SHA-256 and size; failed/cancelled download cleanup; HTTPS custom feed retained; asynchronous updates do not depend on a UI dispatcher");
+		lines.Add("PASS: first-party manifest with GitHub fallback; two/three-part Windows tags; pagination; stale local feed ignored; offline/cancel never report latest; installer SHA-256 and size; failed/cancelled download cleanup; HTTPS custom feed retained; asynchronous updates do not depend on a UI dispatcher");
 	}
 	private static void CheckWithoutUiDispatcher(string json, Version old) {
 		Task check = Task.Run(delegate {

@@ -1,5 +1,5 @@
 {
-  "Version": "1.2.5.0",
-  "DownloadUrl": "https://github.com/a17746168234-alt/Yike/releases/tag/windows-v1.2.5",
-  "Notes": "Yike Windows 1.2.5：OCR / 框选菜单统一为主界面主题；开始新翻译时自动清除上一段暂停的朗读。"
+  "Version": "2.1.0.0",
+  "DownloadUrl": "https://github.com/a17746168234-alt/Yike/releases/tag/windows-v2.1.0",
+  "Notes": "Yike Windows 2.1：真实服务器更新链路、动态语音波形、高精度识别、可靠卸载与轻量安装包。"
 }

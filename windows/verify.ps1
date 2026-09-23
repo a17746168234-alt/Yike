@@ -27,7 +27,7 @@ $previews=@(
     @{File='selection-light-loading.png';Arguments=@('--render-preview','--selection-preview','--loading')},
     @{File='settings-light.png';Arguments=@('--render-preview','--settings-preview')},
     @{File='settings-dark.png';Arguments=@('--render-preview','--settings-preview','--dark')},
-    @{File='deepl-dialog.png';Arguments=@('--render-preview','--engine-preview','--dark')},
+    @{File='engine-menu.png';Arguments=@('--render-preview','--engine-preview','--dark')},
     @{File='deepl-help.png';Arguments=@('--render-preview','--deepl-help-preview','--dark')},
     @{File='history-preview.png';Arguments=@('--render-preview','--history-preview','--dark')},
     @{File='about-updates.png';Arguments=@('--render-preview','--about-preview','--dark')}

@@ -39,6 +39,12 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 namespace WindowsTranslator {
 public partial class App {
+private static string DisplayVersion (Version version)
+{
+	if (version == null) return "";
+	return version.Build <= 0 && version.Revision <= 0 ? version.ToString (2) : version.ToString (3);
+}
+
 private async Task CheckForUpdatesAsync (System.Windows.Controls.Button button, TextBlock statusText)
 {
 	if (button == null || !button.IsEnabled) {
@@ -60,12 +66,12 @@ private async Task CheckForUpdatesAsync (System.Windows.Controls.Button button, 
 		}
 		if (!result.UpdateAvailable) {
 			bool newerLocal = result.CurrentVersion > result.LatestVersion;
-			statusText.Text = newerLocal ? "本机版本高于 GitHub 已发布版本 " + result.LatestVersion.ToString (3) : "已确认：当前为 Windows 最新稳定版 " + result.CurrentVersion.ToString (3);
-			ShowUpdateDialog (newerLocal ? "当前无需更新" : "当前为最新版", "当前安装 " + result.CurrentVersion.ToString (3) + "\nGitHub Windows 稳定版 " + result.LatestVersion.ToString (3), "查看发布页", delegate { OpenWeb (result.ReleaseUrl); });
+			statusText.Text = newerLocal ? "本机版本高于服务器已发布版本 " + DisplayVersion (result.LatestVersion) : "已确认：当前为 Windows 最新稳定版 " + DisplayVersion (result.CurrentVersion);
+			ShowUpdateDialog (newerLocal ? "当前无需更新" : "当前为最新版", "当前安装 " + DisplayVersion (result.CurrentVersion) + "\n服务器 Windows 稳定版 " + DisplayVersion (result.LatestVersion), "查看发布页", delegate { OpenWeb (result.ReleaseUrl); });
 			return;
 		}
-		statusText.Text = "发现 Windows 新版本 " + result.LatestVersion.ToString (3);
-		ShowUpdateDialog ("发现 Windows 新版本", "当前安装 " + result.CurrentVersion.ToString (3) + " → " + result.LatestVersion.ToString (3) + "\n\n" + (result.Notes ?? "") + "\n\n更新将保留本机设置和历史。", result.CanInstall ? "下载并安装" : "查看发布页", async delegate {
+		statusText.Text = "发现 Windows 新版本 " + DisplayVersion (result.LatestVersion);
+		ShowUpdateDialog ("发现 Windows 新版本", "当前安装 " + DisplayVersion (result.CurrentVersion) + " → " + DisplayVersion (result.LatestVersion) + "\n\n" + (result.Notes ?? "") + "\n\n更新将保留本机设置和历史。", result.CanInstall ? "下载并安装" : "查看发布页", async delegate {
 			if (result.CanInstall) await InstallUpdateAsync (result);
 			else OpenWeb (result.ReleaseUrl);
 		});

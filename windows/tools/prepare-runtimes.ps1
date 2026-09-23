@@ -8,8 +8,9 @@ $required = @(
     'speech-runtime\python.exe',
     'speech-runtime\LICENSE.txt',
     'speech-runtime\Lib\site-packages\edge_tts\__init__.py',
-    'whisper-runtime\ggml-base-q5_1.bin',
-    'whisper-runtime\Release\whisper-stream.exe',
+    'whisper-runtime\ggml-small-q8_0.bin',
+	'whisper-runtime\Release\whisper-stream.exe',
+	'whisper-runtime\Release\whisper-cli.exe',
     'whisper-runtime\Release\whisper.dll',
     'whisper-runtime\Release\SDL2.dll'
 )

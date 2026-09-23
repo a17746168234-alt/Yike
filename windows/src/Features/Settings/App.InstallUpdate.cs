@@ -9,10 +9,10 @@ public partial class App {
 	private async Task InstallUpdateAsync (UpdateCheckResult release) {
 		using (CancellationTokenSource cancel = new CancellationTokenSource ()) {
 			StackPanel body = new StackPanel { Margin = new Thickness (28) };
-			body.Children.Add (Label ("正在下载 Yike Windows " + release.LatestVersion.ToString (3)));
+			body.Children.Add (Label ("正在下载 Yike Windows " + DisplayVersion (release.LatestVersion)));
 			ProgressBar progress = new ProgressBar { Minimum = 0, Maximum = 100, Height = 10, Margin = new Thickness (0, 20, 0, 12) };
 			body.Children.Add (progress);
-			TextBlock message = Label ("正在连接 GitHub；下载完成后核对 SHA-256，再运行安装包。", true);
+			TextBlock message = Label ("正在连接更新服务；下载完成后核对大小与 SHA-256，再运行安装包。", true);
 			body.Children.Add (message);
 			Window dialog = OverlayDialog ("安装更新", 570, 320, body);
 			System.Windows.Controls.Button cancelButton = OverlayButton ("取消下载", delegate { dialog.Close (); });

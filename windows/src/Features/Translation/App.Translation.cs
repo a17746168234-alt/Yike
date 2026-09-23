@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -83,9 +83,20 @@ private async void Translate ()
 	if (string.IsNullOrWhiteSpace (input.Text)) {
 		return;
 	}
-	if (string.IsNullOrWhiteSpace (Store.Key) && remoteSession == null) {
-		Status ("请先注册或登录 Yike 账号，或在设置中填写自己的 DeepL 密钥。");
+	string selectedEngine = SelectedTranslationEngine ();
+	if (string.IsNullOrWhiteSpace (selectedEngine)) {
+		Status ("请先在顶部 DeepL 菜单中选择使用赠送额度或自己的密钥。");
+		EngineMenu ();
+		return;
+	}
+	if (selectedEngine == TranslationEngines.Public && remoteSession == null) {
+		Status ("当前选择的是赠送额度，请先注册或登录 Yike 账号。");
 		ShowSettings (false, "account");
+		return;
+	}
+	if (selectedEngine == TranslationEngines.Personal && string.IsNullOrWhiteSpace (Store.Key)) {
+		Status ("当前选择的是个人接入，请先在“了解与帮助”中填写 DeepL 密钥。");
+		ShowSettings (false, "deepl");
 		return;
 	}
 	// A new translation starts a new result lifecycle. Never leave the previous
@@ -104,7 +115,7 @@ private async void Translate ()
 	busy = true;
 	Find<System.Windows.Controls.Button> ("TranslateButton").Content = "取消";
 	UpdateActionAvailability ();
-	Status (remoteSession != null ? "正在优先使用 Yike 公共体验额度…" : "正在使用你的 DeepL 密钥翻译…");
+	Status (selectedEngine == TranslationEngines.Public ? "正在使用赠送额度翻译…" : "正在使用你的 DeepL 密钥翻译…");
 	try {
 		TranslationPlan plan = ((doc == null) ? TranslationPlan.Create (text) : null);
 		List<string> texts = ((doc == null) ? plan.Units : doc.Regions.Select ((Region r) => r.Text).ToList ());
@@ -132,7 +143,7 @@ private async void Translate ()
 			});
 		};
 		string publicSource = (from == "auto") ? detected.Code : from;
-		TranslationExecutionResult execution = await new TranslationRouter (Store.Key).TranslateProgressive (remoteSession, texts, publicSource, requestSource, to, (doc == null) ? null : text, showLine, ct);
+		TranslationExecutionResult execution = await new TranslationRouter (Store.Key).TranslateProgressive (selectedEngine, remoteSession, texts, publicSource, requestSource, to, (doc == null) ? null : text, showLine, ct);
 		List<string> result = execution.Values;
 		if (execution.UsedPublicQuota) {
 			RemoteAccountSessionStore.Save (remoteSession);

@@ -293,32 +293,41 @@ public static partial class Tests
 	internal static void RunTranslationRouterTests (List<string> lines)
 	{
 		RemoteAccountSession session = new RemoteAccountSession { Token = "token", Email = "user@example.com", Granted = 200000, Remaining = 200000 };
-		YikeApiFake publicFirst = new YikeApiFake ();
+		YikeApiFake selectedPublic = new YikeApiFake ();
 		Fake unusedPersonal = new Fake ();
-		TranslationRouter router = new TranslationRouter ("personal:fx", () => new YikeAccountClient (publicFirst), key => new DeepL (key, unusedPersonal));
-		TranslationExecutionResult result = router.TranslateProgressive (session, new string[1] { "hello" }, "EN-US", "EN-US", "ZH-HANS", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
-		Check (result.UsedPublicQuota && !result.UsedPersonalFallback && result.EngineName == "Yike 公共 DeepL" && publicFirst.TranslateCalls == 1 && unusedPersonal.Calls == 0, "configured personal key did not keep public quota first");
+		TranslationRouter router = new TranslationRouter ("personal:fx", () => new YikeAccountClient (selectedPublic), key => new DeepL (key, unusedPersonal));
+		TranslationExecutionResult result = router.TranslateProgressive (TranslationEngines.Public, session, new string[1] { "hello" }, "EN-US", "EN-US", "ZH-HANS", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
+		Check (result.UsedPublicQuota && result.EngineName == "DeepL 高质量翻译" && selectedPublic.TranslateCalls == 1 && unusedPersonal.Calls == 0, "selected public engine called the personal key");
+
+		YikeApiFake unusedPublic = new YikeApiFake ();
+		Fake selectedPersonal = new Fake ();
+		router = new TranslationRouter ("personal:fx", () => new YikeAccountClient (unusedPublic), key => new DeepL (key, selectedPersonal));
+		result = router.TranslateProgressive (TranslationEngines.Personal, session, new string[1] { "hello" }, "EN-US", "EN-US", "ZH-HANS", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
+		Check (!result.UsedPublicQuota && result.EngineName == "DeepL（个人接入）" && unusedPublic.TranslateCalls == 0 && selectedPersonal.Calls == 1, "selected personal engine called the gifted quota");
 
 		YikeApiFake emptyPool = new YikeApiFake { TranslateErrorCode = "pool_empty" };
-		Fake fallbackPersonal = new Fake ();
-		router = new TranslationRouter ("personal:fx", () => new YikeAccountClient (emptyPool), key => new DeepL (key, fallbackPersonal));
-		result = router.TranslateProgressive (session, new string[1] { "hello" }, "EN-US", "EN-US", "ZH-HANS", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
-		Check (result.UsedPersonalFallback && result.EngineName.Contains ("后备") && emptyPool.TranslateCalls == 1 && fallbackPersonal.Calls == 1, "empty public quota did not safely fall back to personal key");
-
-		YikeApiFake uncertain = new YikeApiFake { TranslateErrorCode = "request_processed" };
 		Fake blockedPersonal = new Fake ();
 		bool blocked = false;
 		try {
-			router = new TranslationRouter ("personal:fx", () => new YikeAccountClient (uncertain), key => new DeepL (key, blockedPersonal));
-			router.TranslateProgressive (session, new string[1] { "hello" }, "EN-US", "EN-US", "ZH-HANS", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
-		} catch (YikeApiException ex) { blocked = ex.ErrorCode == "request_processed"; }
-		Check (blocked && blockedPersonal.Calls == 0, "uncertain public request was duplicated through personal key");
+			router = new TranslationRouter ("personal:fx", () => new YikeAccountClient (emptyPool), key => new DeepL (key, blockedPersonal));
+			router.TranslateProgressive (TranslationEngines.Public, session, new string[1] { "hello" }, "EN-US", "EN-US", "ZH-HANS", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
+		} catch (YikeApiException ex) { blocked = ex.ErrorCode == "pool_empty"; }
+		Check (blocked && emptyPool.TranslateCalls == 1 && blockedPersonal.Calls == 0, "failed public engine silently consumed the personal quota");
 
 		Fake unsupportedPersonal = new Fake ();
-		router = new TranslationRouter ("personal:fx", () => { throw new Exception ("public client should not be created"); }, key => new DeepL (key, unsupportedPersonal));
-		result = router.TranslateProgressive (session, new string[1] { "bonjour" }, "FR", "FR", "DE", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
-		Check (!result.UsedPublicQuota && unsupportedPersonal.Calls == 1, "unsupported public language did not use the personal key");
-		lines.Add ("PASS: translation routing prefers each user's 200k public quota, safely falls back to a personal key, and never duplicates uncertain public requests");
+		bool unsupportedBlocked = false;
+		try {
+			router = new TranslationRouter ("personal:fx", () => { throw new Exception ("public client should not be created"); }, key => new DeepL (key, unsupportedPersonal));
+			router.TranslateProgressive (TranslationEngines.Public, session, new string[1] { "bonjour" }, "FR", "FR", "DE", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
+		} catch (InvalidOperationException ex) { unsupportedBlocked = ex.Message.Contains ("个人接入"); }
+		Check (unsupportedBlocked && unsupportedPersonal.Calls == 0, "unsupported public language silently switched to the personal key");
+
+		bool missingPersonalBlocked = false;
+		try {
+			new TranslationRouter ("").TranslateProgressive (TranslationEngines.Personal, session, new string[1] { "hello" }, "EN-US", "EN-US", "ZH-HANS", null, null, CancellationToken.None).GetAwaiter ().GetResult ();
+		} catch (InvalidOperationException ex) { missingPersonalBlocked = ex.Message.Contains ("了解与帮助"); }
+		Check (missingPersonalBlocked, "personal engine without a key did not give an actionable error");
+		lines.Add ("PASS: translation routing strictly follows the selected gifted or personal engine and never consumes the other quota automatically");
 	}
 
 	public static async Task SpeechIntegration ()
@@ -390,13 +399,13 @@ public static partial class Tests
 				Thread.Sleep (200);
 				Check (failure == null, "microphone level polling failed: " + failure);
 				Check (input.Stop (), "offline bilingual microphone did not stop");
-				Check (input.Completion.Wait (5000), "offline microphone process did not exit and drain");
+				Check (input.Completion.Wait (15000), "offline microphone process did not exit, refine, and drain");
 			} finally {
 				if (input != null) {
 					((IDisposable)input).Dispose ();
 				}
 			}
-			File.WriteAllText (path, "PASS: offline bilingual Whisper model loaded and opened the default microphone stream.");
+			File.WriteAllText (path, "PASS: high-accuracy multilingual Whisper model loaded and opened the default microphone stream.");
 		} catch (Exception ex) {
 			File.WriteAllText (path, "FAIL: " + ex);
 			Environment.ExitCode = 1;
@@ -488,16 +497,21 @@ public static partial class Tests
 			DeepLCredentialResult result4 = DeepLCredentials.ValidateAndSave ("  ", CancellationToken.None).GetAwaiter ().GetResult ();
 			Check (!result4.Success && result4.Message.Contains ("密钥不能为空"), "empty DeepL key did not return an actionable save failure");
 			list.Add ("PASS: DeepL key save rejects empty input with an actionable reason");
-			Check (true, "speech silence timeout is not two seconds");
-			Check (true, "speech input gives no startup grace period");
-			Check (true, "speech input does not allow final recognition to complete after stop");
-			Check (true, "speech input can start competing microphone recognizers");
+			Check (SpeechInput.SilenceMilliseconds == 6000, "speech silence timeout is not six seconds");
+			Check (App.ShouldAutoSubmitVoiceResult (true, false, true, "识别结果") && !App.ShouldAutoSubmitVoiceResult (false, false, true, "识别结果") && !App.ShouldAutoSubmitVoiceResult (true, true, true, "识别结果") && !App.ShouldAutoSubmitVoiceResult (true, false, false, "识别结果") && !App.ShouldAutoSubmitVoiceResult (true, false, true, " "), "speech auto-submit policy can send manual, unfinished, failed, or empty input");
+			Check (SpeechInput.StartupSilenceMilliseconds == 8000, "speech input gives no startup grace period");
+			Check (SpeechInput.GracefulStopMilliseconds >= WhisperSpeechInput.StepMilliseconds, "speech input does not allow the final audio step to complete after stop");
+			Check (SpeechInput.MaximumConcurrentRecognizers == 1, "speech input can start competing microphone recognizers");
 			Check (SpeechText.NormalizeMixedLanguages ("你好OpenAI助手") == "你好 OpenAI 助手", "mixed Chinese and English speech was not separated");
 			Check (SpeechText.Insertion ("你好", "世界", "") == "世界" && SpeechText.Insertion ("hello", "world", "") == " world" && SpeechText.LanguageLabel ("你好 OpenAI") == "中文 / English" && SpeechText.LanguageLabel ("こんにちは") == "日本語" && SpeechText.LanguageLabel ("안녕하세요") == "한국어", "speech language boundary formatting failed");
-			Check (true, "offline bilingual speech updates are not realtime");
+			Check (WhisperSpeechInput.LanguageCode ("auto") == "auto" && WhisperSpeechInput.LanguageCode ("ZH-HANS") == "zh" && WhisperSpeechInput.LanguageCode ("EN-US") == "en" && WhisperSpeechInput.LanguageCode ("JA") == "ja", "Whisper language hints do not cover automatic and explicit modes");
+			string streamingArguments = WhisperSpeechInput.StreamingArguments ("ZH-HANS");
+			Check (streamingArguments.Contains ("ggml-small-q8_0.bin") && streamingArguments.Contains (" -l zh ") && streamingArguments.Contains ("--length 8000") && streamingArguments.Contains ("-bs 3") && streamingArguments.Contains ("-kc") && streamingArguments.Contains ("-sa") && !streamingArguments.Contains ("-nf") && !streamingArguments.Contains ("-ac 256"), "high-accuracy streaming parameters regressed");
+			string refinementArguments = WhisperSpeechInput.RefinementArguments ("EN-US", "voice.wav");
+			Check (refinementArguments.Contains (" -l en ") && refinementArguments.Contains ("-bs 8") && refinementArguments.Contains ("-bo 8") && refinementArguments.Contains ("-sns") && refinementArguments.Contains ("--prompt") && refinementArguments.Contains ("clear, natural English dictation"), "whole-recording refinement parameters regressed");
 			Check (WhisperSpeechInput.Clean ("\u001b[2K [BLANK_AUDIO]") == "" && WhisperSpeechInput.Clean ("\u001b[2K 你好 OpenAI ") == "你好 OpenAI", "offline bilingual stream output cleanup failed");
-			list.Add ("PASS: speech input uses one microphone recognizer, startup grace, final-result drain, and a two-second sound-activity timeout");
-			list.Add ("PASS: 600 ms offline bilingual speech drafts distinguish Chinese, English, and mixed-language boundaries");
+			list.Add ("PASS: speech input uses one Whisper recognizer, startup grace, final-result drain, and a six-second sound-activity timeout");
+			list.Add ("PASS: automatic and explicit-language speech use small Q8, full audio context, beam search, fallback decoding, and whole-recording refinement");
 			Check (ProxySettings.Normalize ("127.0.0.1:3067") == "http://127.0.0.1:3067" && ProxySettings.Normalize ("socks5://127.0.0.1:3066") == null, "proxy normalization accepted an unsupported endpoint");
 			list.Add ("PASS: current HTTP proxy endpoint is normalized and unsupported proxy schemes are ignored");
 			Check (new Uri ("https://www.deepl.com/en/signup?cta=checkout&is_api=true&productId=api-developer").Host.EndsWith ("deepl.com") && new Uri ("https://www.deepl.com/your-account/keys").Host.EndsWith ("deepl.com") && new Uri ("https://developers.deepl.com/docs/getting-started/auth").Host == "developers.deepl.com", "DeepL help links are not official");
@@ -660,6 +674,36 @@ public static partial class Tests
 			Check (output.Wait (2000), "speech pipe did not drain at EOF");
 		}
 		lines.Add ("PASS speech: short flushed pipe output arrives before EOF; split UTF-8 remains intact");
+		string wavePath = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "Yike-wave-test-" + Guid.NewGuid ().ToString ("N") + ".wav");
+		string enhancedWavePath = null;
+		try {
+			using (MemoryStream wave = new MemoryStream ())
+			using (BinaryWriter writer = new BinaryWriter (wave, Encoding.ASCII, true)) {
+				writer.Write (Encoding.ASCII.GetBytes ("RIFF"));
+				writer.Write ((uint)0);
+				writer.Write (Encoding.ASCII.GetBytes ("WAVEfmt "));
+				writer.Write ((uint)16);
+				writer.Write ((ushort)1);
+				writer.Write ((ushort)1);
+				writer.Write ((uint)16000);
+				writer.Write ((uint)32000);
+				writer.Write ((ushort)2);
+				writer.Write ((ushort)16);
+				writer.Write (Encoding.ASCII.GetBytes ("data"));
+				writer.Write ((uint)0);
+				writer.Write (new byte[320]);
+				writer.Flush ();
+				File.WriteAllBytes (wavePath, wave.ToArray ());
+			}
+			Check (WhisperSpeechInput.RepairWaveHeader (wavePath), "abruptly closed microphone WAV header was not repaired");
+			byte[] repaired = File.ReadAllBytes (wavePath);
+			Check (BitConverter.ToUInt32 (repaired, 4) == repaired.Length - 8 && BitConverter.ToUInt32 (repaired, 40) == repaired.Length - 44, "repaired microphone WAV sizes are invalid");
+			Check (WaveAudioEnhancer.TryEnhance (wavePath, out enhancedWavePath) && enhancedWavePath != wavePath && File.Exists (enhancedWavePath) && new FileInfo (enhancedWavePath).Length == repaired.Length, "microphone cleanup did not produce a valid whole-recording WAV");
+		} finally {
+			if (File.Exists (wavePath)) File.Delete (wavePath);
+			if (!string.IsNullOrWhiteSpace (enhancedWavePath) && File.Exists (enhancedWavePath)) File.Delete (enhancedWavePath);
+		}
+		lines.Add ("PASS speech: abrupt recordings are repaired, high-pass filtered and safely normalized before whole-recording refinement");
 		string producer = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Console]::WriteLine('[Start speaking]'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 200; [Console]::Write('你好'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 800; [Console]::WriteLine(' 世界'); [Console]::Out.Flush(); Start-Sleep -Seconds 30";
 		List<string> liveResults = new List<string> ();
 		using (var live = new WhisperSpeechInput (delegate {

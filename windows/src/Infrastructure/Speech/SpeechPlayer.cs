@@ -108,6 +108,7 @@ public sealed class SpeechPlayer : IDisposable
             if (online) {
                 start.FileName = System.IO.Path.Combine (root, "speech-runtime", "python.exe");
                 start.Arguments = "\"" + System.IO.Path.Combine (root, "speech-online.py") + "\" \"" + jobPath + "\"";
+				start.EnvironmentVariables["PYTHONDONTWRITEBYTECODE"] = "1";
             } else {
                 start.FileName = System.IO.Path.Combine (Environment.GetFolderPath (Environment.SpecialFolder.System), "WindowsPowerShell\\v1.0\\powershell.exe");
                 start.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + System.IO.Path.Combine (root, "speech-local.ps1") + "\" -JobPath \"" + jobPath + "\"";

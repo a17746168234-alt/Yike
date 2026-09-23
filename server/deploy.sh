@@ -53,3 +53,4 @@ else
   exit 1
 fi
 curl --fail --silent --retry 3 --retry-connrefused --retry-delay 1 http://127.0.0.1:8093/v1/config
+curl --fail --silent --retry 3 --retry-connrefused --retry-delay 1 http://127.0.0.1:8093/v1/update/windows

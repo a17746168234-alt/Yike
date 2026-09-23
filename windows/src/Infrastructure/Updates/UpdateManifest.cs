@@ -47,4 +47,15 @@ internal sealed class UpdateManifest
 	public string Notes { get; set; }
 }
 
+internal sealed class ServerUpdateManifest
+{
+	public string version { get; set; }
+	public int build { get; set; }
+	public string title { get; set; }
+	public string notes { get; set; }
+	public string download_url { get; set; }
+	public string sha256 { get; set; }
+	public long size { get; set; }
+}
+
 }

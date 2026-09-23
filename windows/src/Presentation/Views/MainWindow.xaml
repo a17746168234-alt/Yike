@@ -64,6 +64,30 @@
    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/>
    <Setter Property="BorderThickness" Value="1"/>
   </Style>
+  <Style x:Key="WindowCaptionButton" TargetType="Button">
+   <Setter Property="Width" Value="46"/>
+   <Setter Property="Height" Value="48"/>
+   <Setter Property="Margin" Value="0"/>
+   <Setter Property="Padding" Value="0"/>
+   <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+   <Setter Property="Background" Value="Transparent"/>
+   <Setter Property="BorderThickness" Value="0"/>
+   <Setter Property="Cursor" Value="Arrow"/>
+   <Setter Property="Template">
+    <Setter.Value>
+     <ControlTemplate TargetType="Button">
+      <Border x:Name="CaptionSurface" Background="{TemplateBinding Background}">
+       <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Border>
+      <ControlTemplate.Triggers>
+       <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="CaptionSurface" Property="Background" Value="{DynamicResource ControlBrush}"/></Trigger>
+       <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="Tag" Value="caption-close"/></MultiTrigger.Conditions><Setter TargetName="CaptionSurface" Property="Background" Value="#E81123"/><Setter Property="Foreground" Value="White"/></MultiTrigger>
+       <Trigger Property="IsPressed" Value="True"><Setter TargetName="CaptionSurface" Property="Opacity" Value="0.72"/></Trigger>
+      </ControlTemplate.Triggers>
+     </ControlTemplate>
+    </Setter.Value>
+   </Setter>
+  </Style>
   <Style x:Key="ToolbarButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
    <Setter Property="Height" Value="40"/>
    <Setter Property="Padding" Value="8,7"/>
@@ -240,10 +264,10 @@
   </Grid>
 
   <Border x:Name="CustomTitleBar" Grid.Row="0" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Background="#08000000">
-   <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="17,0,0,0" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-    <Button x:Name="CloseWindowButton" Width="14" Height="14" Margin="0,0,8,0" Padding="0" Background="#FF5F57" BorderBrush="#40FFFFFF" BorderThickness="1" ToolTip="关闭" Tag="main-traffic-close" Cursor="Hand"/>
-    <Button x:Name="MinimizeWindowButton" Width="14" Height="14" Margin="0,0,8,0" Padding="0" Background="#FFBD2E" BorderBrush="#40FFFFFF" BorderThickness="1" ToolTip="最小化" Tag="main-traffic-minimize" Cursor="Hand"/>
-    <Button x:Name="MaximizeWindowButton" Width="14" Height="14" Margin="0,0,8,0" Padding="0" Background="#28C840" BorderBrush="#40FFFFFF" BorderThickness="1" ToolTip="最大化 / 还原" Tag="main-traffic-maximize" Cursor="Hand"/>
+   <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+    <Button x:Name="MinimizeWindowButton" Style="{StaticResource WindowCaptionButton}" ToolTip="最小化" Tag="caption-minimize"><TextBlock Text="&#xE921;" FontFamily="Segoe Fluent Icons" FontSize="10"/></Button>
+    <Button x:Name="MaximizeWindowButton" Style="{StaticResource WindowCaptionButton}" ToolTip="最大化" Tag="caption-maximize"><TextBlock x:Name="MaximizeWindowGlyph" Text="&#xE922;" FontFamily="Segoe Fluent Icons" FontSize="10"/></Button>
+    <Button x:Name="CloseWindowButton" Style="{StaticResource WindowCaptionButton}" ToolTip="关闭" Tag="caption-close"><TextBlock Text="&#xE8BB;" FontFamily="Segoe Fluent Icons" FontSize="10"/></Button>
    </StackPanel>
   </Border>
 
@@ -258,8 +282,8 @@
       <TextBlock x:Name="AppDisplayName" Text="Yike" FontSize="21" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxWidth="300"/>
       <Border Background="{DynamicResource SoftAccentBrush}" CornerRadius="8" Padding="7,3" Margin="0,5,0,0" HorizontalAlignment="Left">
        <StackPanel Orientation="Horizontal">
-        <TextBlock Text="&#xE73E;" FontFamily="Segoe Fluent Icons" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-        <TextBlock x:Name="EngineStatus" Text="内容由 DeepL 在线处理" FontSize="10.5" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+        <ContentControl x:Name="EngineStatusIcon" Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center"/>
+        <TextBlock x:Name="EngineStatus" Text="请选择赠送额度或个人密钥" FontSize="10.5" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
        </StackPanel>
       </Border>
      </StackPanel>

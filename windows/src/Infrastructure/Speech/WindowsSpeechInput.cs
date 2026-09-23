@@ -108,7 +108,7 @@ internal sealed class WindowsSpeechInput : ISpeechInputBackend, IDisposable
 			engine.SetInputToDefaultAudioDevice ();
 			lock (sync) {
 				listening = true;
-				silence = new System.Threading.Timer (TimeoutSilence, null, 8000, -1);
+				silence = new System.Threading.Timer (TimeoutSilence, null, SpeechInput.StartupSilenceMilliseconds, -1);
 			}
 			engine.RecognizeAsync (RecognizeMode.Multiple);
 			return true;
@@ -159,7 +159,7 @@ internal sealed class WindowsSpeechInput : ISpeechInputBackend, IDisposable
 	{
 		heardAudio = true;
 		if (silence != null) {
-			silence.Change (2000, -1);
+			silence.Change (SpeechInput.SilenceMilliseconds, -1);
 		}
 	}
 

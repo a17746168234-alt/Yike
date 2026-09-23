@@ -19,7 +19,13 @@ $sources = Get-ChildItem src,tests -Filter '*.cs' -Recurse | Sort-Object FullNam
 & $compiler /nologo /target:winexe /platform:x64 /optimize+ /nowarn:0219,0649 /win32manifest:src/app.manifest /win32icon:assets/app.ico "/out:$outputRoot\Yike.exe" @refs @sources
 if ($LASTEXITCODE -ne 0) { throw '编译失败' }
 Copy-Item src/Presentation/Views/*.xaml $outputRoot -Force
-Copy-Item src/Scripts/ocr.ps1,src/Scripts/speech-online.py,src/Scripts/speech-local.ps1 $outputRoot -Force
+Copy-Item src/Scripts/speech-online.py $outputRoot -Force
+foreach ($powerShellScript in @('ocr.ps1','speech-local.ps1')) {
+    $scriptSource = Join-Path $PSScriptRoot "src\Scripts\$powerShellScript"
+    $scriptDestination = Join-Path $outputRoot $powerShellScript
+    $scriptText = [IO.File]::ReadAllText($scriptSource,[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($scriptDestination,$scriptText,[Text.UTF8Encoding]::new($true))
+}
 Copy-Item assets/app.png,assets/app.ico,assets/update-feed.json $outputRoot -Force
 
 function Copy-RuntimeDirectory([string]$Name) {
@@ -32,6 +38,18 @@ function Copy-RuntimeDirectory([string]$Name) {
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }
     Copy-Item -LiteralPath $sourceRoot -Destination $destination -Recurse -Force
+    if ($Name -eq 'whisper-runtime') {
+        $unusedModel = Join-Path $destination 'ggml-base-q5_1.bin'
+        if (Test-Path -LiteralPath $unusedModel -PathType Leaf) { Remove-Item -LiteralPath $unusedModel -Force }
+    } elseif ($Name -eq 'speech-runtime') {
+        $destinationPrefix = [IO.Path]::GetFullPath($destination).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+        $packageOnly = @(Get-ChildItem -LiteralPath $destination -Directory -Recurse -Force | Where-Object { $_.Name -eq '__pycache__' -or $_.Name.EndsWith('.dist-info',[StringComparison]::OrdinalIgnoreCase) })
+        foreach ($folder in $packageOnly) {
+            $full = [IO.Path]::GetFullPath($folder.FullName)
+            if (-not $full.StartsWith($destinationPrefix,[StringComparison]::OrdinalIgnoreCase)) { throw "拒绝清理输出目录之外的文件：$full" }
+            Remove-Item -LiteralPath $full -Recurse -Force
+        }
+    }
 }
 if (-not $SkipRuntimes) {
     Copy-RuntimeDirectory 'speech-runtime'

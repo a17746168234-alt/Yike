@@ -175,7 +175,7 @@ private UIElement BuildAccountSettingsPage (bool preview)
 			actions.Children.Add (logout);
 			account.Children.Add (actions);
 			StackPanel service = Card (cards, "\ue774", "公共翻译服务");
-			service.Children.Add (Label ("登录后优先使用 Yike 公共 DeepL 体验额度；公共额度不可用或当前语言不受支持时，才使用你在“DeepL 密钥与帮助”中配置的个人密钥。服务器不长期保存原文，译文仅为请求去重短时缓存。", true));
+			service.Children.Add (Label ("登录后可在主界面 DeepL 菜单中选择“DeepL 高质量翻译”，使用 Yike 赠送额度。它与“DeepL（个人接入）”完全独立，Yike 不会自动切换或消耗另一种额度。服务器不长期保存原文，译文仅为请求去重短时缓存。", true));
 		} else {
 			StackPanel intro = Card (cards, "\ue77b", "账号与安全");
 			intro.Children.Add (Label ("注册并验证邮箱后，可一次领取 200,000 字符公共 DeepL 体验额度。已有账号可直接登录；密码不会保存在本机。", true));

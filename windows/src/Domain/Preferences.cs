@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -57,6 +57,8 @@ public class Preferences
 	public string VoiceGender = "female";
 
 	public string OcrLanguage = "auto";
+
+	public string TranslationEngine = "";
 }
 
 }

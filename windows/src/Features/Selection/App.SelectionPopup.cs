@@ -97,9 +97,6 @@ private SelectionPopup CreateSelectionPopup (string original, string targetCode,
 	((System.Windows.Controls.Button)popup.FindName ("ClosePopup")).Click += delegate {
 		popup.Close ();
 	};
-	((System.Windows.Controls.Button)popup.FindName ("ClosePopupButton")).Click += delegate {
-		popup.Close ();
-	};
 	((System.Windows.Controls.Button)popup.FindName ("MinimizePopup")).Click += delegate {
 		popup.WindowState = WindowState.Minimized;
 	};
@@ -118,7 +115,9 @@ private SelectionPopup CreateSelectionPopup (string original, string targetCode,
 		toggleSize ();
 	};
 	popup.StateChanged += delegate {
-		maximize.ToolTip = ((popup.WindowState == WindowState.Maximized) ? "还原窗口" : "最大化");
+		bool maximized = popup.WindowState == WindowState.Maximized;
+		maximize.ToolTip = maximized ? "还原" : "最大化";
+		((TextBlock)popup.FindName ("MaximizePopupGlyph")).Text = maximized ? "\ue923" : "\ue922";
 	};
 	((Grid)popup.FindName ("DragHeader")).MouseLeftButtonDown += delegate(object s, MouseButtonEventArgs e) {
 		DependencyObject hit = e.OriginalSource as DependencyObject;

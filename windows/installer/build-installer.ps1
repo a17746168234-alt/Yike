@@ -17,7 +17,8 @@ if (-not (Test-Path -LiteralPath $SourceExe)) {
 $SourceExe = (Resolve-Path -LiteralPath $SourceExe).Path
 $releaseRoot = Split-Path -Parent $SourceExe
 $applicationVersion = [version][Diagnostics.FileVersionInfo]::GetVersionInfo($SourceExe).FileVersion
-$bundleVersion = [version](Get-Content -LiteralPath (Join-Path $releaseRoot 'update-feed.json') -Raw | ConvertFrom-Json).Version
+$feedText = [IO.File]::ReadAllText((Join-Path $releaseRoot 'update-feed.json'), [Text.Encoding]::UTF8)
+$bundleVersion = [version]($feedText | ConvertFrom-Json).Version
 if ($applicationVersion -ne $bundleVersion) { throw '程序版本与安装包更新信息不一致，已停止打包。请更新 AssemblyInfo.cs 和 assets/update-feed.json 后重新构建。' }
 
 $OutputDirectory = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
@@ -52,21 +53,36 @@ try {
     }
     if (-not (Test-Path -LiteralPath $whisperRuntime)) { throw '找不到 whisper-runtime。' }
     Copy-Item -LiteralPath $whisperRuntime -Destination (Join-Path $payloadRoot 'whisper-runtime') -Recurse -Force
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'uninstall.ps1') -Destination (Join-Path $payloadRoot 'uninstall.ps1') -Force
+    $unusedModel = Join-Path $payloadRoot 'whisper-runtime\ggml-base-q5_1.bin'
+    if (Test-Path -LiteralPath $unusedModel -PathType Leaf) { Remove-Item -LiteralPath $unusedModel -Force }
+    $speechPayload = Join-Path $payloadRoot 'speech-runtime'
+    $speechPrefix = [IO.Path]::GetFullPath($speechPayload).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    foreach ($folder in @(Get-ChildItem -LiteralPath $speechPayload -Directory -Recurse -Force | Where-Object { $_.Name -eq '__pycache__' -or $_.Name.EndsWith('.dist-info',[StringComparison]::OrdinalIgnoreCase) })) {
+        $full = [IO.Path]::GetFullPath($folder.FullName)
+        if (-not $full.StartsWith($speechPrefix,[StringComparison]::OrdinalIgnoreCase)) { throw "拒绝清理安装包临时目录之外的文件：$full" }
+        Remove-Item -LiteralPath $full -Recurse -Force
+    }
+    $uninstallSource = Join-Path $PSScriptRoot 'uninstall.ps1'
+    $uninstallDestination = Join-Path $payloadRoot 'uninstall.ps1'
+    $uninstallText = [IO.File]::ReadAllText($uninstallSource,[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($uninstallDestination,$uninstallText,[Text.UTF8Encoding]::new($true))
     Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $payloadRoot -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'third_party\licenses') -Destination (Join-Path $payloadRoot 'licenses') -Recurse -Force
 
     $requiredPayload = @(
         'Yike.exe','MainWindow.xaml','SelectionWindow.xaml','ocr.ps1','speech-online.py','speech-local.ps1',
         'app.png','app.ico','app-rounded.ico','update-feed.json','uninstall.ps1','speech-runtime\python.exe',
-        'whisper-runtime\ggml-base-q5_1.bin','whisper-runtime\Release\whisper-stream.exe',
-        'whisper-runtime\Release\whisper.dll','whisper-runtime\Release\SDL2.dll'
+		'whisper-runtime\ggml-small-q8_0.bin','whisper-runtime\Release\whisper-stream.exe',
+		'whisper-runtime\Release\whisper-cli.exe','whisper-runtime\Release\whisper.dll','whisper-runtime\Release\SDL2.dll'
     )
     foreach ($relative in $requiredPayload) {
         $requiredPath = Join-Path $payloadRoot $relative
         if (-not (Test-Path -LiteralPath $requiredPath) -or (Get-Item -LiteralPath $requiredPath).Length -eq 0) {
             throw "安装包缺少必要文件：$relative"
         }
+    }
+    if (Test-Path -LiteralPath (Join-Path $payloadRoot 'whisper-runtime\ggml-base-q5_1.bin')) {
+        throw '安装包仍包含未使用的旧语音模型。'
     }
 
     $payloadZip = Join-Path $tempRoot 'payload.zip'
@@ -82,7 +98,7 @@ try {
         '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
         "/out:$tempTargetName",
         "/resource:$payloadZip,payload.zip",
-        '/r:System.dll', '/r:System.Core.dll', '/r:System.Windows.Forms.dll',
+        '/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll',
         '/r:System.IO.Compression.dll', '/r:System.IO.Compression.FileSystem.dll',
         '/r:Microsoft.CSharp.dll', $setupSource
     )

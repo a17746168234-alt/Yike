@@ -9,7 +9,7 @@
     -PackageName "YOUR_PACKAGE_NAME" `
     -Publisher "CN=YOUR_PUBLISHER_ID" `
     -PublisherDisplayName "YOUR_PUBLISHER_NAME" `
-    -Version "1.2.0.0" `
+    -Version "2.1.0.0" `
     -SourceDirectory "$PWD/release/Yike"
 ```
 

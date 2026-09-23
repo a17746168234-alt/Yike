@@ -40,7 +40,7 @@ using Microsoft.Win32;
 namespace WindowsTranslator {
 public sealed class SpeechInput : IDisposable
 {
-	public const int SilenceMilliseconds = 2000;
+	public const int SilenceMilliseconds = 6000;
 
 	public const int StartupSilenceMilliseconds = 8000;
 
@@ -88,7 +88,7 @@ public sealed class SpeechInput : IDisposable
 	public event Action<int> AudioLevelChanged;
 
 	public SpeechInput ()
-		: this ((string language) => (!(language == "auto")) ? ((ISpeechInputBackend)new WindowsSpeechInput ()) : ((ISpeechInputBackend)new WhisperSpeechInput ()))
+		: this ((string language) => new WhisperSpeechInput ())
 	{
 	}
 

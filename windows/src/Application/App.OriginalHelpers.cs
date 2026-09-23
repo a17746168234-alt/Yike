@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -57,14 +57,47 @@ private void ApplyAccountIdentity ()
 		string identity = (remoteSession != null && !string.IsNullOrWhiteSpace (remoteSession.DisplayName)) ? remoteSession.DisplayName : ((remoteSession != null && !string.IsNullOrWhiteSpace (remoteSession.Email)) ? remoteSession.Email : ((current == null) ? "Yike" : current.DisplayName));
 		Find<TextBlock> ("AppDisplayName").Text = identity;
 		TextBlock engineStatus = Find<TextBlock> ("EngineStatus");
-		if (remoteSession != null) {
-			engineStatus.Text = "Yike 公共 DeepL · 剩余 " + remoteSession.Remaining.ToString ("N0") + " 字符" + (string.IsNullOrWhiteSpace (Store.Key) ? "" : " · 个人密钥后备");
-		} else if (!string.IsNullOrWhiteSpace (Store.Key)) {
-			engineStatus.Text = "内容由你的 DeepL 密钥在线处理";
+		ContentControl engineStatusIcon = Find<ContentControl> ("EngineStatusIcon");
+		string selectedEngine = SelectedTranslationEngine ();
+		if (selectedEngine == TranslationEngines.Public) {
+			engineStatus.Text = "由 Yike 服务器交由 DeepL 处理";
+			engineStatusIcon.Tag = "yike";
+			engineStatusIcon.ToolTip = "Yike 赠送额度";
+			engineStatusIcon.Content = new System.Windows.Controls.Image {
+				Source = defaultAppIcon,
+				Width = 14.0,
+				Height = 14.0,
+				Stretch = Stretch.Uniform
+			};
+		} else if (selectedEngine == TranslationEngines.Personal) {
+			engineStatus.Text = "内容由 DeepL 在线处理";
+			engineStatusIcon.Tag = "deepl";
+			engineStatusIcon.ToolTip = "DeepL 个人密钥";
+			TextBlock mark = new TextBlock {
+				Text = "\ue734",
+				FontFamily = new System.Windows.Media.FontFamily ("Segoe Fluent Icons"),
+				FontSize = 13.0,
+				VerticalAlignment = VerticalAlignment.Center,
+				HorizontalAlignment = System.Windows.HorizontalAlignment.Center
+			};
+			mark.SetResourceReference (TextBlock.ForegroundProperty, "AccentBrush");
+			engineStatusIcon.Content = mark;
 		} else {
-			engineStatus.Text = "登录后使用公共 DeepL 体验额度";
+			engineStatus.Text = "请选择赠送额度或个人密钥";
+			engineStatusIcon.Tag = "none";
+			engineStatusIcon.ToolTip = "尚未选择翻译引擎";
+			TextBlock mark = new TextBlock {
+				Text = "\ue946",
+				FontFamily = new System.Windows.Media.FontFamily ("Segoe Fluent Icons"),
+				FontSize = 12.0,
+				VerticalAlignment = VerticalAlignment.Center,
+				HorizontalAlignment = System.Windows.HorizontalAlignment.Center
+			};
+			mark.SetResourceReference (TextBlock.ForegroundProperty, "MutedBrush");
+			engineStatusIcon.Content = mark;
 		}
-		window.Icon = bitmapSource ?? defaultAppIcon;
+		UpdateEngineButtonContent ();
+		window.Icon = defaultAppIcon;
 		if (tray != null) {
 			string text = identity;
 			tray.Text = ((text.Length > 63) ? text.Substring (0, 63) : text);
