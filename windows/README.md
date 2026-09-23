@@ -34,7 +34,7 @@ Yike 是一款基于 C#、WPF 和 DeepL API 的 Windows 桌面翻译工具，将
 
 ## 安装与使用
 
-下载 [Yike Windows 2.1 完整安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v2.1.0) 中的 `Yike-Setup.exe`，运行后安装到当前用户目录，无需管理员权限。完整安装包包含语音运行库；GitHub Actions 的核心构建产物用于开发与检查。
+下载 [Yike Windows 2.1 轻量安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v2.1.0) 中的 `Yike-Setup.exe`，运行后安装到当前用户目录，无需管理员权限。为保持最高语音识别质量，首次安装会显示进度并下载、校验独立的 Whisper small Q8 模型；更新现有安装时直接复用已校验模型，不重复下载。GitHub Actions 的核心构建产物用于开发与检查。
 
 普通安装会先显示安装位置，可直接输入路径或通过“浏览”选择其他本机磁盘和文件夹；更新时会默认使用当前安装目录。静默部署可通过 `--install-dir=<路径>` 指定位置。无论安装到哪个本机路径，都可以从 Windows“已安装的应用”或安装目录内的 `uninstall.ps1` 完整卸载。
 

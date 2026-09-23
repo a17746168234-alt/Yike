@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Net;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
@@ -25,11 +26,17 @@ internal static class Setup
 	private const string DisplayName = "Yike";
 
 	private const string ShortcutIconName = "app-rounded.ico";
+	private const string ModelRelativePath = "whisper-runtime\\ggml-small-q8_0.bin";
+	private const string ModelUrl = "https://github.com/a17746168234-alt/Yike/releases/download/windows-v2.1.0/ggml-small-q8_0.bin";
+	private const string ModelSha256 = "49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f";
+	private const long ModelSize = 264464607L;
+	private static bool silentMode;
 
 	[STAThread]
 	private static int Main(string[] args)
 	{
 		bool flag = args.Any((string arg) => string.Equals(arg, "--silent", StringComparison.OrdinalIgnoreCase));
+		silentMode = flag;
 		bool flag2 = !flag || args.Any((string arg) => string.Equals(arg, "--launch", StringComparison.OrdinalIgnoreCase));
 		try
 		{
@@ -394,6 +401,7 @@ internal static class Setup
 					ownedFiles.Add(PayloadDestination(fullRoot, entry.FullName));
 				}
 			}
+			ownedFiles.Add(Path.Combine(fullRoot, ModelRelativePath));
 			if (Directory.GetFiles(fullRoot, "*", SearchOption.AllDirectories).Any((string path) => !ownedFiles.Contains(Path.GetFullPath(path)))) return;
 			foreach (string installedFile in ownedFiles)
 			{
@@ -425,6 +433,7 @@ internal static class Setup
 		{
 			Directory.CreateDirectory(text);
 			ExtractPayload(text);
+			EnsureSpeechModel(text, root);
 			ValidateInstallation(text);
 			if (File.Exists(installedExe)) {
 				Version currentVersion, payloadVersion;
@@ -474,6 +483,113 @@ internal static class Setup
 		}
 	}
 
+	private static void EnsureSpeechModel(string stagingRoot, string currentRoot)
+	{
+		string target = Path.Combine(stagingRoot, ModelRelativePath);
+		string current = Path.Combine(currentRoot, ModelRelativePath);
+		Directory.CreateDirectory(Path.GetDirectoryName(target));
+		if (IsSpeechModelValid(current))
+		{
+			File.Copy(current, target, true);
+			return;
+		}
+		DownloadSpeechModel(target);
+	}
+
+	private static bool IsSpeechModelValid(string path)
+	{
+		try
+		{
+			if (!File.Exists(path) || new FileInfo(path).Length != ModelSize) return false;
+			using (FileStream stream = File.OpenRead(path))
+			using (SHA256 sha = SHA256.Create())
+			{
+				return string.Equals(BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", ""), ModelSha256, StringComparison.OrdinalIgnoreCase);
+			}
+		}
+		catch (IOException) { return false; }
+		catch (UnauthorizedAccessException) { return false; }
+	}
+
+	private static void DownloadSpeechModel(string target)
+	{
+		string temporary = target + ".download";
+		if (File.Exists(temporary)) File.Delete(temporary);
+		ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+		try
+		{
+			using (WebClient client = new WebClient())
+			{
+				client.Headers[HttpRequestHeader.UserAgent] = "Yike-Setup/2.1";
+				if (silentMode)
+				{
+					client.DownloadFile(new Uri(ModelUrl), temporary);
+				}
+				else
+				{
+					DownloadWithProgress(client, temporary);
+				}
+			}
+			if (!IsSpeechModelValid(temporary)) throw new InvalidDataException("高精度语音模型校验失败，请检查网络后重试安装。");
+			File.Move(temporary, target);
+		}
+		finally
+		{
+			if (File.Exists(temporary)) File.Delete(temporary);
+		}
+	}
+
+	private static void DownloadWithProgress(WebClient client, string destination)
+	{
+		Exception failure = null;
+		bool finished = false;
+		using (Form form = new Form())
+		{
+			form.Text = "安装 Yike 2.1";
+			form.Width = 560;
+			form.Height = 190;
+			form.StartPosition = FormStartPosition.CenterScreen;
+			form.FormBorderStyle = FormBorderStyle.FixedDialog;
+			form.MaximizeBox = false;
+			form.MinimizeBox = false;
+			form.ShowIcon = false;
+			Label title = new Label { Text = "正在下载高精度语音组件", AutoSize = true, Left = 28, Top = 25, Font = new System.Drawing.Font(System.Drawing.SystemFonts.MessageBoxFont.FontFamily, 14f, System.Drawing.FontStyle.Bold) };
+			Label detail = new Label { Text = "保留 Whisper small Q8 识别质量，约 252 MB，仅首次安装需要下载。", AutoSize = true, Left = 28, Top = 62 };
+			ProgressBar progress = new ProgressBar { Left = 28, Top = 94, Width = 490, Height = 22, Minimum = 0, Maximum = 100 };
+			Label amount = new Label { Text = "正在连接 GitHub…", AutoSize = true, Left = 28, Top = 124 };
+			form.Controls.Add(title);
+			form.Controls.Add(detail);
+			form.Controls.Add(progress);
+			form.Controls.Add(amount);
+			client.DownloadProgressChanged += delegate(object sender, DownloadProgressChangedEventArgs e)
+			{
+				progress.Value = Math.Max(0, Math.Min(100, e.ProgressPercentage));
+				amount.Text = string.Format("已下载 {0:F1} / {1:F1} MB", e.BytesReceived / 1048576.0, e.TotalBytesToReceive / 1048576.0);
+			};
+			client.DownloadFileCompleted += delegate(object sender, AsyncCompletedEventArgs e)
+			{
+				failure = e.Error;
+				if (e.Cancelled && failure == null) failure = new OperationCanceledException("已取消安装。");
+				finished = true;
+				form.DialogResult = failure == null ? DialogResult.OK : DialogResult.Abort;
+				form.Close();
+			};
+			form.FormClosing += delegate(object sender, FormClosingEventArgs e)
+			{
+				if (!finished)
+				{
+					e.Cancel = true;
+					amount.Text = "正在取消安装…";
+					client.CancelAsync();
+				}
+			};
+			form.Shown += delegate { client.DownloadFileAsync(new Uri(ModelUrl), destination); };
+			form.ShowDialog();
+		}
+		if (failure != null) throw new InvalidOperationException("高精度语音组件下载失败：" + failure.Message, failure);
+		if (!finished) throw new OperationCanceledException("已取消安装。");
+	}
+
 	private static void ExtractPayload(string destinationRoot)
 	{
 		HashSet<string> hashSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -506,7 +622,7 @@ internal static class Setup
 		}
 	}
 
-	private static void ValidateInstallation(string root)
+	private static void ValidateInstallation(string root, bool requireModel = true)
 	{
 		string[] array = new string[16]
 		{
@@ -530,6 +646,7 @@ internal static class Setup
 		string[] array2 = array;
 		foreach (string text in array2)
 		{
+			if (!requireModel && string.Equals(text, ModelRelativePath, StringComparison.OrdinalIgnoreCase)) continue;
 			string text2 = Path.Combine(root, text);
 			if (!File.Exists(text2) || new FileInfo(text2).Length == 0)
 			{
@@ -573,7 +690,7 @@ internal static class Setup
 		{
 			Directory.CreateDirectory(text2);
 			ExtractPayload(text2);
-			ValidateInstallation(text2);
+			ValidateInstallation(text2, false);
 		}
 		finally
 		{

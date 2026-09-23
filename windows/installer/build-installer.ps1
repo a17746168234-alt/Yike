@@ -55,6 +55,8 @@ try {
     Copy-Item -LiteralPath $whisperRuntime -Destination (Join-Path $payloadRoot 'whisper-runtime') -Recurse -Force
     $unusedModel = Join-Path $payloadRoot 'whisper-runtime\ggml-base-q5_1.bin'
     if (Test-Path -LiteralPath $unusedModel -PathType Leaf) { Remove-Item -LiteralPath $unusedModel -Force }
+    $downloadedModel = Join-Path $payloadRoot 'whisper-runtime\ggml-small-q8_0.bin'
+    if (Test-Path -LiteralPath $downloadedModel -PathType Leaf) { Remove-Item -LiteralPath $downloadedModel -Force }
     $speechPayload = Join-Path $payloadRoot 'speech-runtime'
     $speechPrefix = [IO.Path]::GetFullPath($speechPayload).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     foreach ($folder in @(Get-ChildItem -LiteralPath $speechPayload -Directory -Recurse -Force | Where-Object { $_.Name -eq '__pycache__' -or $_.Name.EndsWith('.dist-info',[StringComparison]::OrdinalIgnoreCase) })) {
@@ -72,7 +74,7 @@ try {
     $requiredPayload = @(
         'Yike.exe','MainWindow.xaml','SelectionWindow.xaml','ocr.ps1','speech-online.py','speech-local.ps1',
         'app.png','app.ico','app-rounded.ico','update-feed.json','uninstall.ps1','speech-runtime\python.exe',
-		'whisper-runtime\ggml-small-q8_0.bin','whisper-runtime\Release\whisper-stream.exe',
+		'whisper-runtime\Release\whisper-stream.exe',
 		'whisper-runtime\Release\whisper-cli.exe','whisper-runtime\Release\whisper.dll','whisper-runtime\Release\SDL2.dll'
     )
     foreach ($relative in $requiredPayload) {
@@ -83,6 +85,9 @@ try {
     }
     if (Test-Path -LiteralPath (Join-Path $payloadRoot 'whisper-runtime\ggml-base-q5_1.bin')) {
         throw '安装包仍包含未使用的旧语音模型。'
+    }
+    if (Test-Path -LiteralPath $downloadedModel) {
+        throw '轻量安装包不应内嵌高精度语音模型。'
     }
 
     $payloadZip = Join-Path $tempRoot 'payload.zip'

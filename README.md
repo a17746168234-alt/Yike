@@ -9,7 +9,7 @@
 
 Windows 版采用 C# / WPF，支持邮箱注册、每位已验证用户 200,000 字符公共 DeepL 体验额度，也可配置个人 DeepL API 密钥作为后备。
 
-Windows 下载：[Yike Windows 2.1 完整安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v2.1.0)（x64，包含语音运行库）。
+Windows 下载：[Yike Windows 2.1 轻量安装包](https://github.com/a17746168234-alt/Yike/releases/tag/windows-v2.1.0)（x64；首次安装自动下载并校验高精度语音模型，更新时复用现有模型）。
 
 Windows 安装器支持在安装前选择本机磁盘和文件夹，后续更新默认沿用已登记的安装位置；自选路径同样可从 Windows“已安装的应用”完整卸载。
 

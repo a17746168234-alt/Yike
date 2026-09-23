@@ -4,6 +4,7 @@
 
 - “检查更新”改为读取 Yike 服务器维护的 Windows 版本清单，服务器暂时不可用时自动回退 GitHub Releases。
 - Windows Release 标签兼容两段至四段版本号；2.1 使用 `windows-v2.1.0`，让已有 2.0 客户端也能发现更新，下载后核对大小和 SHA-256 再启动安装。
+- 安装包不再内嵌 252 MB 的 Whisper small Q8 模型，体积从约 266 MB 降至约 18 MB；首次安装通过独立进度窗口下载并校验同一高精度模型，更新时复用本机模型，因此不降低语音识别质量。
 
 - 语音输入统一使用 multilingual Whisper small Q8；固定中文、English 与自动检测不再分流到旧版 Windows 听写引擎。
 - 实时识别使用更长上下文、beam search 与解码回退，停止后再对整段录音做一次高精度校正。
