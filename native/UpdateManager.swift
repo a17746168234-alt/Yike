@@ -31,7 +31,9 @@ struct YikeUpdateProgressView: View {
                 Spacer()
                 if updater.showsInstallReady {
                     Button("稍后再说") { updater.showsProgress = false }
-                    Button("退出并重启 Yike") { updater.restartAndInstall() }.buttonStyle(.borderedProminent)
+                    if updater.isRestarting { ProgressView().controlSize(.small) }
+                    Button("退出并重启 Yike") { updater.restartAndInstall() }
+                        .buttonStyle(.borderedProminent).disabled(updater.isRestarting)
                 } else if !updater.isChecking {
                     Button("关闭") { updater.showsProgress = false }
                 }
@@ -73,6 +75,7 @@ final class UpdateManager: ObservableObject {
     @Published var showsUpdateAlert = false
     @Published var showsInstallError = false
     @Published var showsInstallReady = false
+    @Published private(set) var isRestarting = false
     @Published var showsProgress = false
     @Published var showsUpdateComplete = false
     private var stagedDMG: URL?
@@ -152,18 +155,29 @@ final class UpdateManager: ObservableObject {
     }
 
     func restartAndInstall() {
-        guard let dmg = stagedDMG else { return }
+        guard let dmg = stagedDMG, !isRestarting else { return }
+        isRestarting = true
         do {
             let directory = dmg.deletingLastPathComponent()
             let helper = directory.appendingPathComponent("install.sh")
-            try Self.installerScript.write(to: helper, atomically: true, encoding: .utf8)
+            guard let bundledHelper = Bundle.main.url(forResource: "UpdateInstaller", withExtension: "sh") else { throw UpdateError.missingInstaller }
+            if FileManager.default.fileExists(atPath: helper.path) {
+                try FileManager.default.removeItem(at: helper)
+            }
+            try FileManager.default.copyItem(at: bundledHelper, to: helper)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
             let process = Process(); process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = [helper.path, String(ProcessInfo.processInfo.processIdentifier), dmg.path, Bundle.main.bundleURL.path, Bundle.main.bundleIdentifier ?? "com.yijian.translator.kimi"]
-            try process.run(); status = "正在退出并重启 Yike…"
+            try process.run()
             if let latest { UserDefaults.standard.set(latest.build, forKey: "yike.update.pendingBuild") }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { NSApp.terminate(nil) }
-        } catch { status = "无法启动重启流程，请重新下载更新。"; showsInstallError = true }
+            UserDefaults.standard.synchronize()
+            status = "正在退出并重启 Yike…"
+            NSApp.terminate(nil)
+        } catch {
+            isRestarting = false
+            status = "无法启动更新助手：\(error.localizedDescription) 当前版本未更改，请重新下载更新。"
+            showsInstallError = true
+        }
     }
 
     private func check(force: Bool) async -> CheckResult? {
@@ -203,42 +217,6 @@ final class UpdateManager: ObservableObject {
         }
     }
 
-    private enum UpdateError: Error { case invalidChecksum }
+    private enum UpdateError: Error { case invalidChecksum, missingInstaller }
 
-    private static let installerScript = #"""
-#!/bin/zsh
-set -u
-old_pid="$1"
-dmg="$2"
-current_app="$3"
-expected_id="$4"
-for _ in {1..300}; do
-    kill -0 "$old_pid" 2>/dev/null || break
-    sleep 0.1
-done
-if kill -0 "$old_pid" 2>/dev/null; then exit 1; fi
-mount_dir="$(mktemp -d /tmp/yike-update-mount.XXXXXX)" || exit 1
-backup_root="$(mktemp -d /tmp/yike-update-backup.XXXXXX)" || exit 1
-backup_app="$backup_root/Yike.app"
-cleanup() {
-    /usr/bin/hdiutil detach "$mount_dir" -quiet 2>/dev/null || true
-    /bin/rm -rf "$mount_dir" "$backup_root" "$(dirname "$dmg")"
-}
-trap cleanup EXIT
-/usr/bin/hdiutil verify "$dmg" >/dev/null || exit 1
-/usr/bin/hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" >/dev/null || exit 1
-new_app="$mount_dir/Yike.app"
-actual_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$new_app/Contents/Info.plist" 2>/dev/null)"
-[[ "$actual_id" == "$expected_id" ]] || exit 1
-/usr/bin/codesign --verify --deep --strict "$new_app" || exit 1
-/usr/bin/ditto "$current_app" "$backup_app" || exit 1
-/bin/rm -rf "$current_app" || exit 1
-if ! /usr/bin/ditto "$new_app" "$current_app" || ! /usr/bin/codesign --verify --deep --strict "$current_app"; then
-    /bin/rm -rf "$current_app"
-    /usr/bin/ditto "$backup_app" "$current_app"
-    /usr/bin/osascript -e 'display dialog "Yike 更新失败，已恢复原版本。" buttons {"知道了"} with title "Yike 更新"' >/dev/null 2>&1 || true
-    exit 1
-fi
-/usr/bin/open "$current_app"
-"""#
 }

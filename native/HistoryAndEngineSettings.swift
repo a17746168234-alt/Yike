@@ -359,7 +359,7 @@ struct DeepLSettingsSheet: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("设置 DeepL API Free")
                         .font(.system(size: 19, weight: .semibold))
-                    Text("密钥只保存在这台电脑的系统钥匙串中。")
+                    Text(SecretStorage.usesPrivateFiles ? "密钥保存在这台电脑的本机私有文件中。" : "密钥只保存在这台电脑的系统钥匙串中。")
                         .font(.system(size: 12))
                         .foregroundStyle(Color.secondary)
                 }

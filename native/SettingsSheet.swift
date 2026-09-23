@@ -63,6 +63,9 @@ struct SettingsSheet: View {
     @State private var glossaryTarget = ""
     @State private var glossarySourceLanguage = "en"
     @State private var glossaryTargetLanguage = "zh-CN"
+    @State private var privateFilesEnabled = SecretStorage.usesPrivateFiles
+    @State private var showPrivateFilesConfirmation = false
+    @State private var secretStorageMessage = ""
 
     private var versionText: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0"
@@ -155,6 +158,18 @@ struct SettingsSheet: View {
         .sheet(isPresented: $showHistory) {
             HistorySheet(model: model, isPresented: $showHistory)
         }
+        .confirmationDialog("改为本机私有文件？", isPresented: $showPrivateFilesConfirmation, titleVisibility: .visible) {
+            Button("启用本机保存") {
+                do {
+                    try SecretStorage.enablePrivateFiles()
+                    privateFilesEnabled = true
+                    secretStorageMessage = "账号会话和 DeepL 密钥已迁移；以后更新不再读取钥匙串。"
+                } catch { secretStorageMessage = "迁移失败：\(error.localizedDescription)；仍使用系统钥匙串。" }
+            }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("资料将保存在仅当前 macOS 账户可读的文件中。同一账户运行的其他程序也可能读取；首次迁移可能还需授权钥匙串一次。")
+        }
         .alert(updateAlertTitle, isPresented: $showUpdateResult) {
             if updateCheckResult == .available {
                 Button("暂不更新", role: .cancel) { }
@@ -233,12 +248,30 @@ struct SettingsSheet: View {
         }
         case .account:
         AccountSecuritySummary(model: model)
+        settingsCard("本机密钥保存", icon: "lock.doc") {
+            Text(privateFilesEnabled ? "账号会话和个人 DeepL 密钥保存在本机私有文件，更新后无需重复授权钥匙串。" : "当前保存在系统钥匙串；临时签名的新版可能再次要求授权。")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+            if privateFilesEnabled {
+                Button("改回系统钥匙串") {
+                    do {
+                        try SecretStorage.useKeychain()
+                        privateFilesEnabled = false
+                        secretStorageMessage = "已改回系统钥匙串。"
+                    } catch { secretStorageMessage = "切换失败：\(error.localizedDescription)" }
+                }
+            } else {
+                Button("启用本机保存，免重复授权") { showPrivateFilesConfirmation = true }
+            }
+            if !secretStorageMessage.isEmpty {
+                Text(secretStorageMessage).font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+        }
         case .deepl:
         if let feedback = model.deepLKeyFeedback { KeySaveFeedbackView(notice: feedback) }
         settingsCard("三种引擎如何工作", icon: "arrow.triangle.branch") {
             engineExplanation("Apple 系统翻译", detail: "调用 macOS 15 及以上的系统翻译能力。首次使用需下载对应语言包，准备完成后在本机处理文字，无需 DeepL 密钥。")
             Divider()
-            engineExplanation("DeepL（个人接入）", detail: "使用你自己的 API Free 密钥，将待翻译文字直接发送到 DeepL 在线翻译，消耗个人账号额度。密钥保存在本机系统钥匙串中。")
+            engineExplanation("DeepL（个人接入）", detail: "使用你自己的 API Free 密钥，将待翻译文字直接发送到 DeepL 在线翻译，消耗个人账号额度。密钥按“账号与安全”中的本机保存方式存放。")
             Divider()
             engineExplanation("DeepL 高质量翻译", detail: "登录 Yike 账号后使用，无需填写个人密钥。待翻译文字通过 Yike 服务转交 DeepL 处理，使用账号可用额度，需要联网。")
             Text("图片先在本机识别文字，再交给所选引擎翻译；翻译记录是否保留，可在“历史记录”中设置。")

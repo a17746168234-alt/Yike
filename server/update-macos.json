@@ -1,8 +1,8 @@
 {
   "version": "2.3",
-  "build": 75,
-  "title": "Yike 2.3 Build 75 · 更新反馈修复",
-  "notes": "下载更新时显示进度，校验完成后可点击“退出并重启 Yike”；从旧版升级后首次启动会显示“更新完毕”。头像和昵称仍可同步到服务器。",
-  "download_url": "https://n5v1b.cn/yike-download/Yike-macOS-arm64-v2.3-build75.dmg",
-  "sha256": "182d19963d4083b620c7d5d0dbc2a4e88f84f90aa7b44863a918eb945f120ce9"
+  "build": 76,
+  "title": "Yike 2.3 Build 76 · 自动重启与本机密钥保存",
+  "notes": "修复点击“退出并重启 Yike”后卡住：更新助手会完成安装并自动打开新版，新版启动后显示“更新完毕”。账号与安全可选择将会话和 DeepL 密钥迁移到本机私有文件，避免临时签名更新后反复弹出钥匙串授权。头像和昵称继续同步保存在服务器。",
+  "download_url": "https://n5v1b.cn/yike-download/Yike-macOS-arm64-v2.3-build76.dmg",
+  "sha256": "23bd29d36ec48a5c271c071bcb1087ab2875825f43a83b81e05e178d4b0cbe72"
 }

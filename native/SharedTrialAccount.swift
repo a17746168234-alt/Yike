@@ -36,7 +36,7 @@ final class SharedTrialAccount: ObservableObject {
     @Published var feedbackIsError = false
     private var token = ""
     private var authRevision = UUID()
-    private let keychain = KeychainTextStore(service: SecureKeyStore.applicationID + ".yike-account", account: "session")
+    private let secretStore = SecretTextStore(service: SecureKeyStore.applicationID + ".yike-account", account: "session", fileName: "account-session")
     private var pendingRequests: [Data: String] = [:]
     var isSignedIn: Bool { !token.isEmpty }
     var baseURL: URL? {
@@ -44,7 +44,7 @@ final class SharedTrialAccount: ObservableObject {
               let url = URL(string: value), url.scheme == "https", url.host != nil else { return nil }
         return url
     }
-    init() { token = (try? keychain.load()) ?? "" }
+    init() { token = (try? secretStore.load()) ?? "" }
 
     private func request<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil, authenticated: Bool = true) async throws -> T {
         guard let baseURL else { throw TrialServiceError(code: "not_configured", message: "此版本尚未配置公共体验服务，请更新 Yike。") }
@@ -93,7 +93,7 @@ final class SharedTrialAccount: ObservableObject {
     private struct AuthResponse: Decodable { let token: String; let account: TrialAccount; let message: String }
     struct EmailChallenge: Decodable { let challenge_id: String; let message: String }
     private func accept(_ response: AuthResponse) throws {
-        try keychain.save(response.token)
+        try secretStore.save(response.token)
         authRevision = UUID(); token = response.token; account = response.account; pendingRequests.removeAll()
         feedback = response.message; feedbackIsError = false
         Task { await synchronizeProfile(response.account) }
@@ -153,7 +153,7 @@ final class SharedTrialAccount: ObservableObject {
 
     private func clearSession() {
         authRevision = UUID(); token = ""; account = nil; pendingRequests.removeAll()
-        try? keychain.delete()
+        try? secretStore.delete()
     }
     func logout() async {
         guard !busy else { return }

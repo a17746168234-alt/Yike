@@ -21,7 +21,7 @@
     <key>CFBundleShortVersionString</key>
     <string>2.3</string>
     <key>CFBundleVersion</key>
-    <string>75</string>
+    <string>76</string>
     <key>YikeTrialAPIBaseURL</key>
     <string>https://n5v1b.cn/yike-api/</string>
     <key>LSMinimumSystemVersion</key>
