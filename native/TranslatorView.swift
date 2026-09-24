@@ -72,7 +72,7 @@ struct TranslatorView: View {
 
             VStack(spacing: 0) {
                 header
-                if updater.showsUpdateComplete || updater.phase == .starting || updater.phase == .failed {
+                if updater.showsUpdateComplete || updater.phase == .starting {
                     updateStatusBanner
                         .padding(.horizontal, 24)
                         .padding(.top, 10)
@@ -186,10 +186,8 @@ struct TranslatorView: View {
                 Text("\(update.title)\n\n\(update.notes)")
             }
         }
-        .alert("更新没有完成", isPresented: $updater.showsInstallError) {
-            Button("知道了") { }
-        } message: {
-            Text(updater.status)
+        .sheet(isPresented: $updater.showsInstallError) {
+            YikeInstallFailureView(updater: updater)
         }
         .sheet(isPresented: Binding(
             get: { updater.showsProgress && !showSettings && !model.showSharedAccount },
@@ -210,12 +208,9 @@ struct TranslatorView: View {
             Spacer(minLength: 8)
             if updater.showsUpdateComplete {
                 Button("知道了") { updater.showsUpdateComplete = false }
-            } else if updater.phase == .failed {
-                Button("重试更新") { Task { await updater.retry() } }
-                    .disabled(updater.isChecking)
             }
         }
-        .foregroundStyle(updater.phase == .failed ? Color(nsColor: .systemRed) : MacVisualTokens.accent)
+        .foregroundStyle(MacVisualTokens.accent)
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
     }

@@ -49,6 +49,30 @@ struct YikeUpdateProgressView: View {
     }
 }
 
+
+struct YikeInstallFailureView: View {
+    @ObservedObject var updater: UpdateManager
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(Color(nsColor: .systemRed))
+            Text("安装失败")
+                .font(.title2.bold())
+            Text(updater.status.isEmpty ? "已保留或恢复原版本，请稍后重试更新。" : updater.status)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("我知道了") { updater.showsInstallError = false }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(28)
+        .frame(width: 390, height: 230)
+    }
+}
+
 private final class YikeDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     let progressHandler: (Double) -> Void
     var continuation: CheckedContinuation<(URL, HTTPURLResponse), Error>?
@@ -109,8 +133,7 @@ final class UpdateManager: ObservableObject {
         didHandleLaunch = true
         if FileManager.default.fileExists(atPath: failureMarker.path) {
             UserDefaults.standard.removeObject(forKey: "yike.update.pendingBuild")
-            phase = .failed
-            status = "安装失败，已保留或恢复原版本。请重试更新。"
+            presentInstallFailure("安装失败，已保留或恢复原版本。请重试更新。")
             return
         }
         let pending = UserDefaults.standard.integer(forKey: "yike.update.pendingBuild")
@@ -181,16 +204,14 @@ final class UpdateManager: ObservableObject {
             showsInstallReady = true
         } catch {
             downloadProgress = nil
-            phase = .failed
-            status = error is UpdateError ? "安装包校验失败，已保留当前版本。" : "更新失败：\(error.localizedDescription) 已保留当前版本，请稍后重试。"
+            presentInstallFailure(error is UpdateError ? "安装包校验失败，已保留当前版本。" : "更新失败：\(error.localizedDescription) 已保留当前版本，请稍后重试。")
         }
     }
 
     func retry() async {
         if latest == nil || !hasUpdate {
             guard await check(force: true) == .available else {
-                phase = .failed
-                status = "更新仍未完成，暂时无法获取安装包。请检查网络后重试。"
+                presentInstallFailure("更新仍未完成，暂时无法获取安装包。请检查网络后重试。")
                 return
             }
         }
@@ -214,9 +235,7 @@ final class UpdateManager: ObservableObject {
                 Task { @MainActor in
                     guard let self, self.isRestarting else { return }
                     self.isRestarting = false
-                    self.phase = .failed
-                    self.status = "安装未完成，已保留或恢复原版本。请重试更新。"
-                    self.showsProgress = true
+                    self.presentInstallFailure("安装未完成，已保留或恢复原版本。请重试更新。")
                 }
             }
             try process.run()
@@ -232,9 +251,16 @@ final class UpdateManager: ObservableObject {
                 NSApp.terminate(nil)
             }
         } catch {
-            isRestarting = false; phase = .failed; showsInstallReady = false
-            status = "无法启动安装，请重试更新：\(error.localizedDescription)"
+            isRestarting = false; showsInstallReady = false
+            presentInstallFailure("无法启动安装，请重试更新：\(error.localizedDescription)")
         }
+    }
+
+    private func presentInstallFailure(_ message: String) {
+        phase = .failed
+        status = message
+        showsProgress = false
+        showsInstallError = true
     }
 
     private func check(force: Bool) async -> CheckResult? {

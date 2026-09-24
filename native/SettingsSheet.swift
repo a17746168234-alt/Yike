@@ -184,10 +184,8 @@ struct SettingsSheet: View {
                 Text(updater.status)
             }
         }
-        .alert("更新没有完成", isPresented: $updater.showsInstallError) {
-            Button("知道了", role: .cancel) { }
-        } message: {
-            Text(updater.status)
+        .sheet(isPresented: $updater.showsInstallError) {
+            YikeInstallFailureView(updater: updater)
         }
         .sheet(isPresented: $updater.showsProgress) {
             YikeUpdateProgressView(updater: updater)
