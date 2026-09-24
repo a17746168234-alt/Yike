@@ -39,8 +39,8 @@ struct DeepLClient {
     var retryDelay: () async throws -> Void = { try await Task.sleep(for: .milliseconds(400)) }
 
     func translate(_ texts: [String], source: String, target: String) async throws -> [String] {
-        let sources = ["en": "EN", "zh-CN": "ZH", "ja": "JA", "ko": "KO"]
-        let targets = ["en": "EN-US", "zh-CN": "ZH-HANS", "ja": "JA", "ko": "KO"]
+        let sources = ["en": "EN", "zh-CN": "ZH", "ja": "JA", "ko": "KO", "de": "DE", "fr": "FR"]
+        let targets = ["en": "EN-US", "zh-CN": "ZH-HANS", "ja": "JA", "ko": "KO", "de": "DE", "fr": "FR"]
         guard let source = sources[source], let target = targets[target] else { throw TranslationFailure.unsupportedLanguages }
         var results: [String] = []
         // Bound each request by bytes as well as item count. Each OCR region keeps its result index.
@@ -101,7 +101,7 @@ enum AppleLanguagePreparation {
     @MainActor
     static func prepare(_ session: TranslationSession, source: String, target: String,
                         status: (String) -> Void) async throws {
-        let locales = ["en": "en", "zh-CN": "zh-Hans", "ja": "ja", "ko": "ko"]
+        let locales = ["en": "en", "zh-CN": "zh-Hans", "ja": "ja", "ko": "ko", "de": "de", "fr": "fr"]
         guard let source = locales[source], let target = locales[target], source != target else {
             throw TranslationFailure.unsupportedLanguages
         }

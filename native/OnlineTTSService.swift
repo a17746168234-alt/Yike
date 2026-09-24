@@ -65,6 +65,14 @@ final class OnlineTTSService {
                 .female: "ja-JP-NanamiNeural",
                 .male: "ja-JP-KeitaNeural"
             ],
+            "de": [
+                .female: "de-DE-KatjaNeural",
+                .male: "de-DE-ConradNeural"
+            ],
+            "fr": [
+                .female: "fr-FR-DeniseNeural",
+                .male: "fr-FR-HenriNeural"
+            ],
             "ko": [
                 .female: "ko-KR-SunHiNeural",
                 .male: "ko-KR-InJoonNeural"

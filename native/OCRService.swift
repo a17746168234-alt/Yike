@@ -182,7 +182,7 @@ enum OCRService {
         request.usesLanguageCorrection = true
         request.automaticallyDetectsLanguage = true
         let supported = try request.supportedRecognitionLanguages()
-        request.recognitionLanguages = ["en-US", "zh-Hans", "ja-JP", "ko-KR"].filter(supported.contains)
+        request.recognitionLanguages = ["en-US", "zh-Hans", "ja-JP", "ko-KR", "de-DE", "fr-FR"].filter(supported.contains)
         try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
         return request.results ?? []
     }

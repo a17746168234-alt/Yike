@@ -86,6 +86,7 @@ final class UpdateManager: ObservableObject {
     @Published var showsProgress = false
     @Published var showsUpdateComplete = false
     private var stagedDMG: URL?
+    private var isRestarting = false
 
     private let lastCheckKey = "yike.update.lastCheck"
     private let lastLaunchedBuildKey = "yike.update.lastLaunchedBuild"
@@ -256,7 +257,7 @@ final class UpdateManager: ObservableObject {
         }
     }
 
-    private enum UpdateError: Error { case invalidChecksum }
+    private enum UpdateError: Error { case invalidChecksum, missingInstaller }
 
     private static let installerScript = #"""
 #!/bin/zsh

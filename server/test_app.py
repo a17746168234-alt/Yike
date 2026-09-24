@@ -37,6 +37,19 @@ class TrialTests(unittest.TestCase):
         self.assertEqual(self.calls.count('translate'),1)
         body['text']=['不同文字']
         self.assertCode('request_conflict',lambda:self.service.translate(self.user,body))
+    def test_german_french_translation_both_directions(self):
+        requests=[]
+        def upstream(endpoint,body=None):
+            if endpoint=='usage': return {'character_count':0,'character_limit':1000000}
+            requests.append(body)
+            return {'translations':[{'text':'translated'} for _ in body['text']]}
+        self.service.upstream=upstream
+        for source,target in [('de','en'),('en','de'),('fr','en'),('en','fr')]:
+            body=self.payload('Bonjour Guten Tag'); body.update(source=source,target=target)
+            result=self.service.translate(self.user,body)
+            self.assertEqual(result['translations'],['translated'])
+            self.assertEqual(requests[-1]['source_lang'],source.upper())
+            self.assertEqual(requests[-1]['target_lang'],'EN-US' if target=='en' else target.upper())
     def test_no_key_or_disabled_never_calls_deepl(self):
         self.service.enabled=False
         self.assertCode('shared_unavailable',lambda:self.service.translate(self.user,self.payload()))

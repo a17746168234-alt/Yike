@@ -19,6 +19,7 @@ fi
 test "$(git -C "$speech_source" rev-parse HEAD)" = "$speech_commit"
 "$cmake_bin" -S "$speech_source" -B "$speech_build" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+  -DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)" \
   -DCMAKE_OSX_ARCHITECTURES=arm64 -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF \
   -DGGML_BLAS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
   -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_CURL=OFF

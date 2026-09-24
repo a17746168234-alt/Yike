@@ -11,12 +11,12 @@ struct VoiceEditingTests {
     @MainActor
     static func main() throws {
         _ = NSApplication.shared
-        for (language, expected, text) in [("zh", "zh-CN", "你好"), ("en", "en", "Hello"), ("ja", "ja", "こんにちは"), ("ko", "ko", "안녕하세요")] {
+        for (language, expected, text) in [("zh", "zh-CN", "你好"), ("en", "en", "Hello"), ("ja", "ja", "こんにちは"), ("ko", "ko", "안녕하세요"), ("de", "de", "Guten Tag"), ("fr", "fr", "Bonjour")] {
             let data = try JSONSerialization.data(withJSONObject: ["result": ["language": language], "transcription": [["text": text]]])
             try require(tryParse(data) == LocalSpeechResult(text: text, language: expected), "detected audio language mapping")
         }
         for data in [Data(#"{"result":{"language":"en"},"transcription":[{"text":"  "}]}"#.utf8),
-                     Data(#"{"result":{"language":"fr"},"transcription":[{"text":"Bonjour"}]}"#.utf8)] {
+                     Data(#"{"result":{"language":"es"},"transcription":[{"text":"Hola"}]}"#.utf8)] {
             try require(tryParse(data) == nil, "empty or unsupported result must not masquerade as English")
         }
         try require(VoiceMeter.normalized(decibels: -80) == 0, "silence should be flat")

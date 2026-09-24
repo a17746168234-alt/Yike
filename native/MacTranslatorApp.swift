@@ -224,24 +224,30 @@ let languageLabels: [String: String] = [
     "en": "英语",
     "zh-CN": "简体中文",
     "ja": "日语",
-    "ko": "韩语"
+    "ko": "韩语",
+    "de": "德语",
+    "fr": "法语"
 ]
 
-let concreteLanguages = ["en", "zh-CN", "ja", "ko"]
-let sourceLanguagesWithAuto = ["auto", "en", "zh-CN", "ja", "ko"]
+let concreteLanguages = ["en", "zh-CN", "ja", "ko", "de", "fr"]
+let sourceLanguagesWithAuto = ["auto", "en", "zh-CN", "ja", "ko", "de", "fr"]
 
 let speechLocales: [String: String] = [
     "en": "en-US",
     "zh-CN": "zh-CN",
     "ja": "ja-JP",
-    "ko": "ko-KR"
+    "ko": "ko-KR",
+    "de": "de-DE",
+    "fr": "fr-FR"
 ]
 
 let appleTranslationLocales: [String: String] = [
     "en": "en",
     "zh-CN": "zh",
     "ja": "ja",
-    "ko": "ko"
+    "ko": "ko",
+    "de": "de",
+    "fr": "fr"
 ]
 
 func languageName(_ code: String) -> String {
