@@ -208,12 +208,29 @@ final class UpdateManager: ObservableObject {
             try FileManager.default.copyItem(at: bundledHelper, to: helper)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
             let process = Process(); process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = [helper.path, String(ProcessInfo.processInfo.processIdentifier), dmg.path, Bundle.main.bundleURL.path, Bundle.main.bundleIdentifier ?? "com.yijian.translator.kimi"]
+            process.arguments = [helper.path, String(ProcessInfo.processInfo.processIdentifier), dmg.path, Bundle.main.bundleURL.path, Bundle.main.bundleIdentifier ?? "com.yijian.translator.kimi", failureMarker.path]
+            process.terminationHandler = { [weak self] process in
+                guard process.terminationStatus != 0 else { return }
+                Task { @MainActor in
+                    guard let self, self.isRestarting else { return }
+                    self.isRestarting = false
+                    self.phase = .failed
+                    self.status = "安装未完成，已保留或恢复原版本。请重试更新。"
+                    self.showsProgress = true
+                }
+            }
             try process.run()
             if let latest { UserDefaults.standard.set(latest.build, forKey: "yike.update.pendingBuild") }
             UserDefaults.standard.synchronize()
             phase = .installing; showsInstallReady = false; status = "安装中，Yike 即将重新启动…"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { NSApp.terminate(nil) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                self.showsProgress = false
+                if NSApp.modalWindow != nil { NSApp.abortModal() }
+                for window in NSApp.windows {
+                    if let sheet = window.attachedSheet { window.endSheet(sheet) }
+                }
+                NSApp.terminate(nil)
+            }
         } catch {
             isRestarting = false; phase = .failed; showsInstallReady = false
             status = "无法启动安装，请重试更新：\(error.localizedDescription)"

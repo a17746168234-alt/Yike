@@ -5,6 +5,8 @@ old_pid="$1"
 dmg="$2"
 current_app="$3"
 expected_id="$4"
+failure_marker="${5:-$HOME/Library/Application Support/$expected_id/yike-update-failed}"
+relaunch="${6:-1}"
 mount_dir=""
 backup_root=""
 backup_app=""
@@ -27,10 +29,13 @@ trap cleanup EXIT
 
 fail() {
     print "update failed: $1"
+    /bin/mkdir -p "$(/usr/bin/dirname "$failure_marker")"
+    /usr/bin/touch "$failure_marker"
     if [[ -d "$backup_app" && ! -d "$current_app" ]]; then
         /usr/bin/ditto "$backup_app" "$current_app" || preserve_backup=true
     fi
-    if [[ -d "$current_app" ]]; then /usr/bin/open -n "$current_app" || true; fi
+    if [[ "$relaunch" == 1 && -d "$current_app" ]]; then /usr/bin/open -n "$current_app" || true; fi
+    [[ "$relaunch" == 1 ]] || exit 1
     /usr/bin/osascript -e 'display dialog "Yike 自动更新没有完成。请查看 ~/Library/Logs/Yike/updater.log；如果原版无法打开，请保留日志及临时备份。" buttons {"知道了"} with title "Yike 更新"' >/dev/null 2>&1 || true
     exit 1
 }
@@ -74,6 +79,11 @@ if ! /usr/bin/ditto "$new_app" "$current_app" || ! /usr/bin/codesign --verify --
     /bin/rm -rf "$current_app"
     if ! /usr/bin/ditto "$backup_app" "$current_app"; then preserve_backup=true; fi
     fail "install or installed signature"
+fi
+/bin/rm -f "$failure_marker"
+if [[ "$relaunch" != 1 ]]; then
+    print "update completed; app left closed"
+    exit 0
 fi
 print "new app installed; opening"
 if ! /usr/bin/open -n "$current_app"; then
