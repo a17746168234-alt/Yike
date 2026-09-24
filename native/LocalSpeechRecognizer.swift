@@ -13,7 +13,7 @@ enum LocalSpeechError: LocalizedError {
         case .downloadSourcesFailed(let details): return "语音模型下载未完成。\(details)\n请检查网络及代理是否正常，再点击“重新下载”；也可以在左上角手动选择语言，使用系统语音识别。"
         case .invalidModel: return "语音模型文件不完整或校验失败，请重新下载。"
         case .noSpeech: return "没有识别到清晰的语音。请靠近麦克风，说一句完整的话后再试。"
-        case .unsupportedLanguage(let code): return "识别到的语言（\(code)）不在中英日韩范围内；请说完整句子重试，或手动选择语言。"
+        case .unsupportedLanguage(let code): return "识别到的语言（\(code)）不在中英日韩德法范围内；请说完整句子重试，或手动选择语言。"
         case .recognitionFailed: return "本地语音识别未能完成，请缩短录音后重试，或手动选择语言。"
         }
     }
@@ -106,7 +106,7 @@ struct LocalSpeechResult: Equatable {
             let transcription: [Segment]
         }
         let output = try JSONDecoder().decode(Output.self, from: data)
-        let languages = ["zh": "zh-CN", "en": "en", "ja": "ja", "ko": "ko"]
+        let languages = ["zh": "zh-CN", "en": "en", "ja": "ja", "ko": "ko", "de": "de", "fr": "fr"]
         guard let language = languages[output.result.language] else {
             throw LocalSpeechError.unsupportedLanguage(output.result.language)
         }

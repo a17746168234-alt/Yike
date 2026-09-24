@@ -141,8 +141,8 @@ class Service:
         if not user['email']: raise APIError(403,'email_required','请在账号与安全中验证邮箱后使用赠送额度。')
         if not self.enabled or not self.key: raise APIError(503,'shared_unavailable','公共 DeepL 尚未开启，请使用 Apple 翻译或填写自己的密钥。')
         texts, source, target=body.get('text'),body.get('source'),body.get('target')
-        sources={'en':'EN','zh-CN':'ZH','ja':'JA','ko':'KO'}
-        targets={'en':'EN-US','zh-CN':'ZH-HANS','ja':'JA','ko':'KO'}
+        sources={'en':'EN','zh-CN':'ZH','ja':'JA','ko':'KO','de':'DE','fr':'FR'}
+        targets={'en':'EN-US','zh-CN':'ZH-HANS','ja':'JA','ko':'KO','de':'DE','fr':'FR'}
         if not isinstance(source,str) or not isinstance(target,str) or source not in sources or target not in targets or source==target: raise APIError(400,'languages','请选择支持且不同的原文和目标语言。')
         if not isinstance(texts,list) or not 1<=len(texts)<=40 or any(not isinstance(t,str) or not t.strip() for t in texts): raise APIError(400,'text','请输入有效的翻译文字。')
         cost=sum(len(t) for t in texts)

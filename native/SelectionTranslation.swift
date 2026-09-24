@@ -347,7 +347,7 @@ struct SelectionTranslationPopup: View {
 
     private func popupLanguageMenu(selection: String, excluding: String, action: @escaping (String) -> Void) -> some View {
         Menu {
-            ForEach(["en", "zh-CN", "ja", "ko"].filter { $0 != excluding }, id: \.self) { code in
+            ForEach(concreteLanguages.filter { $0 != excluding }, id: \.self) { code in
                 Button(languageName(code)) { action(code) }
             }
         } label: {

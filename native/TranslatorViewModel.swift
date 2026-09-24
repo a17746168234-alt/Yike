@@ -881,6 +881,8 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             case "ja": return "ja"
             case "ko": return "ko"
             case "en": return "en"
+            case "de": return "de"
+            case "fr": return "fr"
             default: break
             }
         }
@@ -1828,7 +1830,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             guard recorder.record(forDuration: 60) else { throw LocalSpeechError.recognitionFailed }
             isListening = true
             notice = nil
-            voiceInputStatus = "自动识别中英日韩 · 回车完成"
+            voiceInputStatus = "自动识别中英日韩德法 · 回车完成"
             voiceMeterTask = Task { [weak self] in
                 guard let self else { return }
                 var lastSound = Date()

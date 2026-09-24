@@ -129,7 +129,7 @@ struct TranslatorView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Label("启用语音自动检测", systemImage: "waveform")
                     .font(.system(size: 18, weight: .semibold))
-                Text("首次下载约 148MB 的中英日韩语音模型，之后可在本机自动识别，无需密钥。录音不会上传到翻译服务；识别后点击翻译时按所选翻译引擎处理文字。")
+                Text("首次下载约 148MB 的多语言语音模型，之后可在本机自动识别，无需密钥。录音不会上传到翻译服务；识别后点击翻译时按所选翻译引擎处理文字。")
                     .font(.system(size: 13)).foregroundStyle(.secondary)
                 Text("自动模式录音结束后显示文字；手动选择语言可使用系统实时识别。")
                     .font(.system(size: 12)).foregroundStyle(.secondary)
@@ -371,7 +371,7 @@ struct TranslatorView: View {
                                         : "请在屏幕上框选要翻译的区域…")
                                      : "正在识别图片中的文字…")
                                     .font(.system(size: 14, weight: .semibold))
-                                Text("支持英语、中文、日语和韩语")
+                                Text("支持英语、中文、日语、韩语、德语和法语")
                                     .font(.system(size: 11))
                                     .foregroundStyle(Color.secondary)
                             }
@@ -409,7 +409,7 @@ struct TranslatorView: View {
                                     .font(.system(size: 34, weight: .medium))
                                 Text("松开鼠标，开始翻译图片")
                                     .font(.system(size: 15, weight: .medium))
-                                Text("支持英语、中文、日语和韩语")
+                                Text("支持英语、中文、日语、韩语、德语和法语")
                                     .font(.system(size: 12))
                             }
                             .foregroundStyle(accent)
@@ -744,7 +744,7 @@ struct TranslatorView: View {
     private func chooseImage() {
         let panel = NSOpenPanel()
         panel.title = "选择要翻译的图片"
-        panel.message = "支持英语、中文、日语和韩语"
+        panel.message = "支持英语、中文、日语、韩语、德语和法语"
         panel.prompt = "翻译图片"
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
@@ -860,6 +860,8 @@ struct TranslatorView: View {
         case "zh-CN": return "在这里输入中文…"
         case "ja": return "在这里输入日文…"
         case "ko": return "在这里输入韩文…"
+        case "de": return "在这里输入德文…"
+        case "fr": return "在这里输入法文…"
         default: return "在这里输入文字…"
         }
     }
@@ -871,6 +873,8 @@ struct TranslatorView: View {
         case "zh-CN": return "也可以把中文图片拖到这里"
         case "ja": return "也可以把日文图片拖到这里"
         case "ko": return "也可以把韩文图片拖到这里"
+        case "de": return "也可以把德文图片拖到这里"
+        case "fr": return "也可以把法文图片拖到这里"
         default: return "也可以把图片拖到这里"
         }
     }
@@ -881,6 +885,8 @@ struct TranslatorView: View {
         case "zh-CN": return "中"
         case "ja": return "日"
         case "ko": return "韩"
+        case "de": return "德"
+        case "fr": return "法"
         default: return code
         }
     }
