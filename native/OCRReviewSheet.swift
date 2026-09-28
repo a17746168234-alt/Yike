@@ -8,6 +8,8 @@ struct ImageOCRReviewSheet: View {
     @State private var blocks: [RecognizedImageBlock]
     @State private var selectedID: UUID?
     @FocusState private var focusedID: UUID?
+    @State private var undoBlocks: [(blocks: [RecognizedImageBlock], deleted: [RecognizedImageBlock])] = []
+    @State private var deletedBlocks: [RecognizedImageBlock] = []
     @State private var adding = false
     @State private var multiSelect = false
     @State private var selection = Set<UUID>()
@@ -41,8 +43,15 @@ struct ImageOCRReviewSheet: View {
         )
     }
 
+    private func saveUndo() {
+        undoBlocks.append((blocks, deletedBlocks))
+        if undoBlocks.count > 50 { undoBlocks.removeFirst() }
+    }
+
     private func deleteSelectedBlock() {
         guard let index = selectedIndex else { return }
+        saveUndo()
+        deletedBlocks.append(blocks[index])
         focusedID = nil
         selection.remove(blocks[index].id)
         blocks.remove(at: index)
@@ -67,6 +76,9 @@ struct ImageOCRReviewSheet: View {
                 }
                 Spacer()
                 Button("恢复识别结果") {
+                    guard confirmYikeAction("恢复全部识别结果？", detail: "当前文字和区域修改将被替换。", action: "确认恢复") else { return }
+                    saveUndo()
+                    deletedBlocks = []
                     blocks = originalBlocks
                     selection = []
                     selectedID = originalBlocks.first?.id
@@ -74,6 +86,7 @@ struct ImageOCRReviewSheet: View {
                 }
                 .disabled(blocks == originalBlocks)
                 Button(model.isInitialImageOCRReview ? "取消导入" : "取消") {
+                    guard blocks == originalBlocks || confirmYikeAction("放弃当前修改？", detail: "尚未应用的文字框修改不会保存。", action: "放弃修改") else { return }
                     model.cancelImageOCREditing()
                 }
                 .keyboardShortcut(.cancelAction)
@@ -90,6 +103,13 @@ struct ImageOCRReviewSheet: View {
             Divider()
 
             HStack(spacing: 12) {
+                Button("撤销") {
+                    guard let previous = undoBlocks.popLast() else { return }
+                    blocks = previous.blocks
+                    deletedBlocks = previous.deleted
+                    selectedID = blocks.first?.id
+                    focusedID = nil
+                }.disabled(undoBlocks.isEmpty)
                 Toggle("补框", isOn: $adding).toggleStyle(.button)
                     .onChange(of: adding) { _ in focusedID = nil; draftRect = nil }
                 Toggle("多选", isOn: $multiSelect).toggleStyle(.button)
@@ -99,7 +119,7 @@ struct ImageOCRReviewSheet: View {
                 Text(characterCount > 5_000 ? "超过 5,000 字，请分图或删减区域" : "\(characterCount) / 5,000 字")
                     .foregroundStyle(characterCount > 5_000 ? Color.red : Color.secondary)
             }.padding(.horizontal, 20).padding(.vertical, 8)
-            Text(adding ? "在图片上拖动框选，松开后输入漏识别的文字。" : model.ocrSummary)
+            Text(adding ? "在图片上拖动框选，松开后输入文字；框住已删除区域可恢复原文。" : model.ocrSummary)
                 .font(.system(size: 12)).foregroundStyle(Color.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.bottom, 8)
             HStack(spacing: 0) {
@@ -113,6 +133,23 @@ struct ImageOCRReviewSheet: View {
                         .frame(width: fit.width, height: fit.height)
                         .position(x: fit.midX, y: fit.midY)
 
+                    ForEach(deletedBlocks.filter { removed in !blocks.contains(where: { $0.id == removed.id }) }) { block in
+                        let box = block.boundingBox
+                        Button {
+                            saveUndo()
+                            blocks.append(block)
+                            deletedBlocks.removeAll { $0.id == block.id }
+                            selectedID = block.id
+                        } label: {
+                            Rectangle().fill(Color.gray.opacity(0.12))
+                                .overlay(Rectangle().stroke(Color.gray, style: StrokeStyle(lineWidth: 1, dash: [4])))
+                                .overlay(Image(systemName: "arrow.uturn.backward").foregroundStyle(Color.blue))
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: box.width * fit.width, height: box.height * fit.height)
+                        .position(x: fit.minX + box.midX * fit.width, y: fit.minY + (1 - box.midY) * fit.height)
+                        .help("恢复此处删除的文字框")
+                    }
                     ForEach(blocks) { block in
                         let box = block.boundingBox
                         let rect = CGRect(
@@ -194,7 +231,13 @@ struct ImageOCRReviewSheet: View {
                                 .onEnded { value in
                                     defer { draftRect = nil }
                                     guard let box = OCRDocument.normalizedRect(from: value.startLocation, to: value.location, imageRect: fit) else { return }
-                                    let block = RecognizedImageBlock(text: "", boundingBox: box, reviewed: true)
+                                    saveUndo()
+                                    let recovered = deletedBlocks.first { candidate in
+                                        let overlap = candidate.boundingBox.intersection(box)
+                                        return !overlap.isNull && overlap.width * overlap.height > candidate.boundingBox.width * candidate.boundingBox.height * 0.5
+                                    }
+                                    let block = recovered ?? RecognizedImageBlock(text: "", boundingBox: box, reviewed: true)
+                                    deletedBlocks.removeAll { $0.id == block.id }
                                     blocks.append(block)
                                     selectedID = block.id
                                     focusedID = block.id
@@ -233,6 +276,7 @@ struct ImageOCRReviewSheet: View {
 
     private func mergeSelection() {
         guard let merged = OCRDocument.merge(blocks.filter { selection.contains($0.id) }) else { return }
+        saveUndo()
         blocks.removeAll { selection.contains($0.id) }
         blocks.append(merged)
         blocks = OCRDocument.ordered(blocks)
@@ -279,6 +323,7 @@ struct ImageOCRReviewSheet: View {
                         Button("在标记处分开") {
                             let parts = OCRDocument.split(block, at: offset, axis: splitAxis)
                             guard parts.count == 2 else { return }
+                            saveUndo()
                             blocks.replaceSubrange(index...index, with: parts)
                             selectedID = parts.first?.id
                         }

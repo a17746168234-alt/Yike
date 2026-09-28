@@ -119,6 +119,9 @@ struct TranslatorView: View {
                 AppleTranslationWorker(model: model)
             }
         }
+        .sheet(item: $model.pendingImageCrop) { item in
+            ImageCropSheet(item: item, cancel: { model.pendingImageCrop = nil }, confirm: model.finishImageCrop)
+        }
         .sheet(isPresented: $showHistory) {
             HistorySheet(model: model, isPresented: $showHistory)
         }
@@ -174,6 +177,7 @@ struct TranslatorView: View {
         .sheet(isPresented: $showSettings) {
             SettingsSheet(model: model)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openYikeSettings)) { _ in showSettings = true }
         .onReceive(NotificationCenter.default.publisher(for: .translateSelectedText)) { notification in
             let processID = (notification.userInfo?["pid"] as? Int).map(pid_t.init)
             model.translateSelectedText(from: processID)
@@ -551,7 +555,9 @@ struct TranslatorView: View {
                     .disabled(model.isRecognizingImage || model.isCapturingRegion || model.isLoading)
                     .help("点击后有 3 秒切换到目标窗口，然后拖动框选")
                     Divider().frame(height: 18)
-                    Button(action: model.clear) {
+                    Button(action: {
+                        if confirmYikeAction("清空当前内容？", detail: "当前输入、译文和图片将被清空。", action: "确认清空") { model.clear() }
+                    }) {
                         Label("清空", systemImage: "trash")
                     }
                     .disabled(model.sourceText.isEmpty && model.translatedText.isEmpty && !model.hasImageTranslation)

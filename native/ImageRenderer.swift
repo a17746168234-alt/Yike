@@ -115,6 +115,27 @@ func renderedTranslationImage(
     paragraph.alignment = .center
     paragraph.lineBreakMode = .byWordWrapping
 
+    // Estimate a common source line height so paragraph height is not mistaken for font size.
+    let lineHeights = edits.map { edit -> CGFloat in
+        let lines = max(1, edit.originalText.components(separatedBy: .newlines).count)
+        return edit.boundingBox.height * imageSize.height / CGFloat(lines)
+    }.sorted()
+    var bodySize = min(36, max(8, (lineHeights.isEmpty ? 18 : lineHeights[lineHeights.count / 2]) * 0.72))
+    let initialBodySize = bodySize
+    let fits = edits.filter { $0.fontScale == 1 && !$0.translatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.compactMap { edit -> CGFloat? in
+        let original = CGRect(x: edit.boundingBox.minX * imageSize.width, y: edit.boundingBox.minY * imageSize.height,
+                              width: edit.boundingBox.width * imageSize.width, height: edit.boundingBox.height * imageSize.height)
+        let text = edit.originalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.contains("\n") && text.count < 32 && original.height > initialBodySize * 1.8 { return nil }
+        var box = original.insetBy(dx: -min(imageSize.width * 0.024, max(4, original.width * 0.08)),
+                                  dy: -min(imageSize.height * 0.016, max(3, original.height * 0.22)))
+        box.origin.x = max(2, box.origin.x); box.origin.y = max(2, box.origin.y)
+        box.size.width = min(box.width, imageSize.width - box.minX - 2)
+        box.size.height = min(max(box.height, original.height * 1.45), imageSize.height - box.minY - 2)
+        let rect = box.insetBy(dx: max(3, box.width * 0.035), dy: max(2, box.height * 0.08))
+        return TextLayout.fontSize(for: edit.translatedText, in: rect.size, preferred: initialBodySize)
+    }
+    if let commonFit = fits.min() { bodySize = min(bodySize, commonFit) }
     for edit in edits {
         let translated = edit.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !translated.isEmpty else { continue }
@@ -140,8 +161,7 @@ func renderedTranslationImage(
             of: #"^([•·▪◦*-]|\d+[.)、])\s*"#,
             options: .regularExpression
         ) != nil
-        let looksLikeTitle = originalRect.height > imageSize.height * 0.045
-            || (trimmedOriginal.count < 42 && originalRect.width > imageSize.width * 0.42)
+        let looksLikeTitle = !trimmedOriginal.contains("\n") && trimmedOriginal.count < 32 && originalRect.height > initialBodySize * 1.8
         let automaticAlignment: NSTextAlignment = (looksLikeList || originalRect.width > imageSize.width * 0.38) ? .left : .center
         paragraph.alignment = edit.alignment.resolved(automaticAlignment: automaticAlignment)
         let rgbBackground = sample.average.usingColorSpace(.deviceRGB) ?? sample.average
@@ -208,7 +228,7 @@ func renderedTranslationImage(
 
         let textRect = box.insetBy(dx: max(3, box.width * 0.035), dy: max(2, box.height * 0.08))
         let resolvedTextColor = edit.textColor.resolved(automaticColor: textColor)
-        let preferredFontSize = min(max(8, originalRect.height * 0.78 * CGFloat(edit.fontScale)), 54)
+        let preferredFontSize = min(54, max(1, (looksLikeTitle ? initialBodySize * 1.3 : bodySize) * CGFloat(edit.fontScale)))
         let fontSize = TextLayout.fontSize(for: translated, in: textRect.size, preferred: preferredFontSize, bold: looksLikeTitle)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: fontSize, weight: looksLikeTitle ? .bold : .semibold),

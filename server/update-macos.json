@@ -1,8 +1,8 @@
 {
   "version": "2.6.2",
-  "build": 80,
-  "title": "Yike 2.6.2 · 安装失败提示修复",
-  "notes": "语音输入状态统一显示“自动识别语言”。修复安装失败后主窗口顶部提示长期占位的问题：失败信息改为独立窗口，显示原因并提供“我知道了”按钮。保留德语与法语支持。",
-  "download_url": "https://n5v1b.cn/yike-download/Yike-macOS-arm64-v2.6.2-build80.dmg",
-  "sha256": "af281cd2745a3a5b5545fa8a9026670a64cbba59799d1f2129ae7d6bdfa4eff4"
+  "build": 82,
+  "title": "Yike 2.6.2 · 图片裁剪与编辑体验优化",
+  "notes": "新增图片翻译前裁剪、单个文字框恢复、统一译文图片字号和历史操作确认；保留原有菜单栏与后台运行行为。",
+  "download_url": "https://n5v1b.cn/yike-download/Yike-macOS-arm64-v2.6.2-build82.dmg",
+  "sha256": "844d51c8a19318563f91cfb7ac73df10383793c55b88db3df2de0a57930904c2"
 }

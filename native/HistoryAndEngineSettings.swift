@@ -36,7 +36,7 @@ struct HistorySheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 10) {
                 Label("历史记录", systemImage: "clock.arrow.circlepath")
                     .font(.system(size: 19, weight: .semibold))
                 Spacer()
@@ -45,25 +45,35 @@ struct HistorySheet: View {
                         Button(selectedIDs.count == filteredHistory.count ? "取消全选" : "全选") {
                             selectedIDs = selectedIDs.count == filteredHistory.count ? [] : Set(filteredHistory.map(\.id))
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
                         Button("删除所选（\(selectedIDs.count)）") {
+                            guard confirmYikeAction("删除所选记录？", detail: "将删除所选的 \(selectedIDs.count) 条记录，无法撤销。", action: "确认删除") else { return }
                             model.deleteHistory(ids: selectedIDs)
                             selectedIDs = []
                             isSelecting = false
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
                         .foregroundStyle(Color.red)
                         .disabled(selectedIDs.isEmpty)
                     } else {
                         Button("多选") { isSelecting = true }
-                            .buttonStyle(.borderless)
-                        Button("清空全部", action: model.clearHistory)
-                            .buttonStyle(.borderless)
+                            .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        Button("清空全部") {
+                            if confirmYikeAction("清空全部文字历史？", detail: "包括置顶记录，清空后无法恢复。", action: "确认清空") { model.clearHistory() }
+                        }
+                            .buttonStyle(.bordered)
+                        .controlSize(.regular)
                             .foregroundStyle(Color.red.opacity(0.8))
                     }
                 } else if historyKind == .image && !model.imageHistory.isEmpty {
-                    Button("清空图片历史", action: model.clearImageHistory)
-                        .buttonStyle(.borderless)
+                    Button("清空图片历史") {
+                        if confirmYikeAction("清空全部图片历史？", detail: "将删除本机保存的原图和译图历史，无法撤销。", action: "确认清空") { model.clearImageHistory() }
+                    }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
                         .foregroundStyle(Color.red.opacity(0.8))
                 }
                 Button(isSelecting ? "取消" : "完成") {
@@ -77,6 +87,8 @@ struct HistorySheet: View {
                     .buttonStyle(.borderedProminent)
                     .tint(purple)
             }
+            .controlSize(.regular)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 22)
             .frame(height: 62)
             .background {
@@ -216,6 +228,7 @@ struct HistorySheet: View {
                                             }
                                         }
                                         Button(role: .destructive) {
+                                            guard confirmYikeAction("删除这条记录？", detail: "删除后无法恢复。", action: "确认删除") else { return }
                                             model.deleteHistory(ids: [item.id])
                                             selectedIDs.remove(item.id)
                                         } label: {
@@ -298,6 +311,7 @@ struct HistorySheet: View {
                                     isPresented = false
                                 }
                                 Button(role: .destructive) {
+                                    guard confirmYikeAction("删除这条图片记录？", detail: "将删除对应的原图和译图历史，无法撤销。", action: "确认删除") else { return }
                                     model.deleteImageHistory(ids: [item.id])
                                 } label: {
                                     Image(systemName: "trash")
