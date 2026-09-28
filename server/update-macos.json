@@ -1,8 +1,8 @@
 {
   "version": "2.6.2",
-  "build": 82,
+  "build": 83,
   "title": "Yike 2.6.2 · 图片裁剪与编辑体验优化",
-  "notes": "新增图片翻译前裁剪、单个文字框恢复、统一译文图片字号和历史操作确认；保留原有菜单栏与后台运行行为。",
-  "download_url": "https://n5v1b.cn/yike-download/Yike-macOS-arm64-v2.6.2-build82.dmg",
-  "sha256": "844d51c8a19318563f91cfb7ac73df10383793c55b88db3df2de0a57930904c2"
+  "notes": "修正发布编号，使 Build 82 测试版可以升级。保留菜单栏操作、图片裁剪、文字框恢复与历史确认；恢复原版划词浮窗和整段朗读，图片文字框删除不再弹确认。",
+  "download_url": "https://n5v1b.cn/yike-download/Yike-macOS-arm64-v2.6.2-build83.dmg",
+  "sha256": "62e04241bc0f83a74ce172a95f9ac3af4bdb4782404a21528563cb06be208c98"
 }
