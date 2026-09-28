@@ -72,7 +72,7 @@ struct TranslatorView: View {
 
             VStack(spacing: 0) {
                 header
-                if updater.showsUpdateComplete || updater.phase == .starting || updater.phase == .failed {
+                if updater.showsUpdateComplete || updater.phase == .starting {
                     updateStatusBanner
                         .padding(.horizontal, 24)
                         .padding(.top, 10)
@@ -118,6 +118,9 @@ struct TranslatorView: View {
             if #available(macOS 15.0, *) {
                 AppleTranslationWorker(model: model)
             }
+        }
+        .sheet(item: $model.pendingImageCrop) { item in
+            ImageCropSheet(item: item, cancel: { model.pendingImageCrop = nil }, confirm: model.finishImageCrop)
         }
         .sheet(isPresented: $showHistory) {
             HistorySheet(model: model, isPresented: $showHistory)
@@ -174,6 +177,7 @@ struct TranslatorView: View {
         .sheet(isPresented: $showSettings) {
             SettingsSheet(model: model)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openYikeSettings)) { _ in showSettings = true }
         .onReceive(NotificationCenter.default.publisher(for: .translateSelectedText)) { notification in
             let processID = (notification.userInfo?["pid"] as? Int).map(pid_t.init)
             model.translateSelectedText(from: processID)
@@ -186,10 +190,8 @@ struct TranslatorView: View {
                 Text("\(update.title)\n\n\(update.notes)")
             }
         }
-        .alert("更新没有完成", isPresented: $updater.showsInstallError) {
-            Button("知道了") { }
-        } message: {
-            Text(updater.status)
+        .sheet(isPresented: $updater.showsInstallError) {
+            YikeInstallFailureView(updater: updater)
         }
         .sheet(isPresented: Binding(
             get: { updater.showsProgress && !showSettings && !model.showSharedAccount },
@@ -210,12 +212,9 @@ struct TranslatorView: View {
             Spacer(minLength: 8)
             if updater.showsUpdateComplete {
                 Button("知道了") { updater.showsUpdateComplete = false }
-            } else if updater.phase == .failed {
-                Button("重试更新") { Task { await updater.retry() } }
-                    .disabled(updater.isChecking)
             }
         }
-        .foregroundStyle(updater.phase == .failed ? Color(nsColor: .systemRed) : MacVisualTokens.accent)
+        .foregroundStyle(MacVisualTokens.accent)
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
@@ -556,7 +555,9 @@ struct TranslatorView: View {
                     .disabled(model.isRecognizingImage || model.isCapturingRegion || model.isLoading)
                     .help("点击后有 3 秒切换到目标窗口，然后拖动框选")
                     Divider().frame(height: 18)
-                    Button(action: model.clear) {
+                    Button(action: {
+                        if confirmYikeAction("清空当前内容？", detail: "当前输入、译文和图片将被清空。", action: "确认清空") { model.clear() }
+                    }) {
                         Label("清空", systemImage: "trash")
                     }
                     .disabled(model.sourceText.isEmpty && model.translatedText.isEmpty && !model.hasImageTranslation)

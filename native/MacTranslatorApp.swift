@@ -13,6 +13,7 @@ let maxSourceCharacters = 5_000
 var globalShortcutDescription: String { SelectionShortcut.load().label }
 
 extension Notification.Name {
+    static let openYikeSettings = Notification.Name("openYikeSettings")
     static let translateSelectedText = Notification.Name("translateSelectedText")
     static let selectionShortcutChanged = Notification.Name("selectionShortcutChanged")
 }
@@ -96,6 +97,8 @@ final class GlobalHotKeyController {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var globalHotKeyController: GlobalHotKeyController?
     private var statusItem: NSStatusItem?
+    private var statusMenu: NSMenu?
+    private var pendingSingleClick: DispatchWorkItem?
     private var mainWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -167,6 +170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func configureStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
+            button.target = self
+            button.action = #selector(statusItemClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.image = MenuBarIcon.make()
             button.toolTip = "Yike · \(globalShortcutDescription) 划词翻译"
         }
@@ -174,6 +180,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let openItem = NSMenuItem(title: "打开 Yike", action: #selector(showMainWindow), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
+        let settingsItem = NSMenuItem(title: "设置", action: #selector(openSettings), keyEquivalent: "")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
         let screenshotItem = NSMenuItem(title: "截图翻译", action: #selector(translateScreenshot), keyEquivalent: "")
         screenshotItem.target = self
         menu.addItem(screenshotItem)
@@ -188,13 +197,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let quitItem = NSMenuItem(title: "退出 Yike", action: #selector(quitApplication), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
-        item.menu = menu
+        statusMenu = menu
         statusItem = item
+    }
+
+    @objc private func statusItemClicked() {
+        pendingSingleClick?.cancel()
+        if NSApp.currentEvent?.type == .rightMouseUp || (NSApp.currentEvent?.clickCount ?? 0) >= 2 {
+            guard let button = statusItem?.button, let menu = statusMenu else { return }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+        } else {
+            let action = DispatchWorkItem { [weak self] in self?.showMainWindow() }
+            pendingSingleClick = action
+            DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: action)
+        }
+    }
+
+    @objc private func openSettings() {
+        showMainWindow()
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .openYikeSettings, object: nil)
+        }
     }
 
     @objc private func refreshShortcutLabels() {
         statusItem?.button?.toolTip = "Yike · \(globalShortcutDescription) 划词翻译"
-        statusItem?.menu?.item(withTag: 1001)?.title = "划词翻译：\(globalShortcutDescription)"
+        statusMenu?.item(withTag: 1001)?.title = "划词翻译：\(globalShortcutDescription)"
     }
 
     @MainActor @objc private func translateScreenshot() {

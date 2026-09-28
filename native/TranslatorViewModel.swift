@@ -333,9 +333,11 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             &accessibilityRect
         ) else { return nil }
 
-        let primaryScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-        let cocoaY = primaryScreenHeight - accessibilityRect.maxY
-        return CGPoint(x: accessibilityRect.midX, y: cocoaY)
+        let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+        let bounds = CGRect(x: accessibilityRect.minX, y: primaryTop - accessibilityRect.maxY,
+                            width: accessibilityRect.width, height: accessibilityRect.height)
+        guard NSScreen.screens.contains(where: { $0.visibleFrame.intersects(bounds) }) else { return nil }
+        return CGPoint(x: bounds.midX, y: bounds.minY)
     }
 
     private func copySelectedTextFromFrontmostApp(completion: @escaping (String?) -> Void) {
@@ -721,8 +723,27 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
         notice = nil
     }
 
+    @Published var pendingImageCrop: ImageCropItem?
     func recognizeAndTranslateImage(at url: URL) {
-        beginImageRecognition(at: url, deleteAfterUse: false)
+        guard !isRecognizingImage, !isLoading else { return }
+        guard let item = ImageCropItem(url: url) else {
+            setInfo("无法打开这张图片，请选择有效的图片文件")
+            return
+        }
+        pendingImageCrop = item
+    }
+
+    func finishImageCrop(_ image: CGImage) {
+        pendingImageCrop = nil
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Yike-Crop-\(UUID().uuidString).png")
+        guard let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
+        do {
+            try data.write(to: url)
+            // Let the crop sheet dismiss before presenting OCR review.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.beginImageRecognition(at: url, deleteAfterUse: true)
+            }
+        } catch { setInfo("保存裁剪图片失败：\(error.localizedDescription)") }
     }
 
     func captureScreenRegionAndTranslate() {
@@ -1830,7 +1851,7 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
             guard recorder.record(forDuration: 60) else { throw LocalSpeechError.recognitionFailed }
             isListening = true
             notice = nil
-            voiceInputStatus = "自动识别中英日韩德法 · 回车完成"
+            voiceInputStatus = "自动识别语言 · 回车完成"
             voiceMeterTask = Task { [weak self] in
                 guard let self else { return }
                 var lastSound = Date()

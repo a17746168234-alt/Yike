@@ -203,6 +203,8 @@ struct ImageTranslationEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     let source: NSImage
     let resetBlocks: [EditableImageTranslationBlock]
+    let initialBlocks: [EditableImageTranslationBlock]
+    @State private var undoBlocks: [[EditableImageTranslationBlock]] = []
     let onApply: ([EditableImageTranslationBlock]) -> Void
     @State private var blocks: [EditableImageTranslationBlock]
     @State private var selectedID: UUID?
@@ -216,6 +218,7 @@ struct ImageTranslationEditorSheet: View {
     ) {
         self.source = source
         self.resetBlocks = resetBlocks
+        self.initialBlocks = blocks
         self.onApply = onApply
         _blocks = State(initialValue: blocks)
         _selectedID = State(initialValue: blocks.first?.id)
@@ -274,12 +277,21 @@ struct ImageTranslationEditorSheet: View {
                         .foregroundStyle(Color.secondary)
                 }
                 Spacer()
+                Button("撤销删除") {
+                    guard let previous = undoBlocks.popLast() else { return }
+                    blocks = previous
+                    selectedID = blocks.first?.id
+                }.disabled(undoBlocks.isEmpty)
                 Button("重置") {
+                    guard confirmYikeAction("重置图片译文？", detail: "文字、位置和样式将恢复为初始翻译结果。", action: "确认重置") else { return }
                     let restored = resetBlocks
                     blocks = restored
                     selectedID = restored.first?.id
                 }
-                Button("取消") { dismiss() }
+                Button("取消") {
+                    guard blocks == initialBlocks || confirmYikeAction("放弃图片修改？", detail: "当前未应用的修改不会保存。", action: "放弃修改") else { return }
+                    dismiss()
+                }
                     .keyboardShortcut(.cancelAction)
                 Button("应用") {
                     onApply(blocks)
@@ -395,6 +407,7 @@ struct ImageTranslationEditorSheet: View {
                         Spacer()
                         Button(role: .destructive) {
                             guard let index = selectedIndex else { return }
+                            undoBlocks.append(blocks)
                             blocks.remove(at: index)
                             selectedID = blocks.first?.id
                         } label: {
