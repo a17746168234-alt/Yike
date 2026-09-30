@@ -120,7 +120,7 @@ struct TranslatorView: View {
             }
         }
         .sheet(item: $model.pendingImageCrop) { item in
-            ImageCropSheet(item: item, cancel: { model.pendingImageCrop = nil }, confirm: model.finishImageCrop)
+            ImageCropSheet(item: item, cancel: { model.pendingImageCrop = nil }, confirm: { model.finishImageCrop(item, selection: $0) })
         }
         .sheet(isPresented: $showHistory) {
             HistorySheet(model: model, isPresented: $showHistory)

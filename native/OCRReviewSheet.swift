@@ -37,6 +37,8 @@ struct ImageOCRReviewSheet: View {
             get: { blocks.first(where: { $0.id == id })?.text ?? "" },
             set: { value in
                 guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
+                guard blocks[index].text != value else { return }
+                saveUndo()
                 blocks[index].text = value
                 blocks[index].reviewed = true
             }
@@ -103,9 +105,10 @@ struct ImageOCRReviewSheet: View {
             Divider()
 
             HStack(spacing: 12) {
-                Button("撤销") {
+                Button("撤销上一步") {
                     guard let previous = undoBlocks.popLast() else { return }
-                    blocks = previous.blocks
+                    blocks = OCRDocument.ordered(previous.blocks)
+                    selection = []
                     deletedBlocks = previous.deleted
                     selectedID = blocks.first?.id
                     focusedID = nil
@@ -137,7 +140,7 @@ struct ImageOCRReviewSheet: View {
                         let box = block.boundingBox
                         Button {
                             saveUndo()
-                            blocks.append(block)
+                            blocks = OCRDocument.ordered(blocks + [block])
                             deletedBlocks.removeAll { $0.id == block.id }
                             selectedID = block.id
                         } label: {
@@ -238,7 +241,7 @@ struct ImageOCRReviewSheet: View {
                                     }
                                     let block = recovered ?? RecognizedImageBlock(text: "", boundingBox: box, reviewed: true)
                                     deletedBlocks.removeAll { $0.id == block.id }
-                                    blocks.append(block)
+                                    blocks = OCRDocument.ordered(blocks + [block])
                                     selectedID = block.id
                                     focusedID = block.id
                                     adding = false
@@ -303,13 +306,13 @@ struct ImageOCRReviewSheet: View {
                     if let candidates = block.candidates, candidates.count > 1 {
                         Menu("切换候选文字") {
                             ForEach(Array(candidates.enumerated()), id: \.offset) { _, candidate in
-                                Button(candidate) { blocks[index].text = candidate; blocks[index].reviewed = true }
+                                Button(candidate) { saveUndo(); blocks[index].text = candidate; blocks[index].reviewed = true }
                             }
                         }
                     }
                     TextField("区域文字", text: textBinding(for: block.id), axis: .vertical)
                         .lineLimit(3...10).textFieldStyle(.roundedBorder)
-                    Button("确认文字正确") { blocks[index].reviewed = true }
+                    Button("确认文字正确") { saveUndo(); blocks[index].reviewed = true }
                     Divider()
                     Text("拆分区域").font(.headline)
                     if block.text.count >= 2 {

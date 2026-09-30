@@ -2,26 +2,10 @@ import SwiftUI
 import AppKit
 import ImageIO
 
-struct ImageCropItem: Identifiable {
-    let id = UUID()
-    let image: CGImage
-    init?(url: URL) {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else { return nil }
-        let dimension = max(properties[kCGImagePropertyPixelWidth] as? Int ?? 1, properties[kCGImagePropertyPixelHeight] as? Int ?? 1)
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: dimension
-        ] as CFDictionary) else { return nil }
-        self.image = image
-    }
-}
-
 struct ImageCropSheet: View {
     let item: ImageCropItem
     let cancel: () -> Void
-    let confirm: (CGImage) -> Void
+    let confirm: (CGRect?) -> Void
     @State private var selection: CGRect?
     private var size: CGSize { CGSize(width: item.image.width, height: item.image.height) }
     var body: some View {
@@ -50,27 +34,21 @@ struct ImageCropSheet: View {
                 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 3).onChanged { value in
-                    func normalized(_ point: CGPoint) -> CGPoint {
-                        CGPoint(x: min(1, max(0, (point.x - fitted.minX) / fitted.width)),
-                                y: min(1, max(0, (point.y - fitted.minY) / fitted.height)))
-                    }
-                    let start = normalized(value.startLocation), end = normalized(value.location)
-                    selection = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x-start.x), height: abs(end.y-start.y))
+                    guard let proposed = ImageCropGeometry.selection(from: value.startLocation, to: value.location, imageRect: fitted) else { return }
+                    selection = proposed
                 })
             }
             HStack {
                 Button("取消", action: cancel).keyboardShortcut(.cancelAction)
                 Button("重新框选") { selection = nil }.disabled(selection == nil)
                 Spacer()
-                Button("使用整张图片") { confirm(item.image) }
+                Button("使用整张图片") { confirm(nil) }
                 Button("裁剪并识别") {
                     guard let selection else { return }
-                    let rect = CGRect(x: selection.minX * size.width, y: selection.minY * size.height,
-                                      width: selection.width * size.width, height: selection.height * size.height).integral
-                    if let cropped = item.image.cropping(to: rect) { confirm(cropped) }
+                    confirm(selection)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled((selection?.width ?? 0) * size.width < 8 || (selection?.height ?? 0) * size.height < 8)
+                .disabled((selection?.width ?? 0) * item.pixelSize.width < 8 || (selection?.height ?? 0) * item.pixelSize.height < 8)
             }.buttonStyle(.bordered)
         }.padding(24).frame(width: 780, height: 600)
     }

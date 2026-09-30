@@ -204,7 +204,7 @@ struct ImageTranslationEditorSheet: View {
     let source: NSImage
     let resetBlocks: [EditableImageTranslationBlock]
     let initialBlocks: [EditableImageTranslationBlock]
-    @State private var undoBlocks: [[EditableImageTranslationBlock]] = []
+    @State private var undoBlocks = EditorUndoHistory<[EditableImageTranslationBlock]>()
     let onApply: ([EditableImageTranslationBlock]) -> Void
     @State private var blocks: [EditableImageTranslationBlock]
     @State private var selectedID: UUID?
@@ -239,6 +239,7 @@ struct ImageTranslationEditorSheet: View {
             },
             set: { value in
                 guard let index = selectedIndex else { return }
+                undoBlocks.append(blocks)
                 blocks[index][keyPath: keyPath] = value
             }
         )
@@ -261,6 +262,7 @@ struct ImageTranslationEditorSheet: View {
                     box.size.height = CGFloat(value)
                     box.origin.y = min(box.origin.y, 1 - box.height)
                 }
+                undoBlocks.append(blocks)
                 blocks[index].boundingBox = box
             }
         )
@@ -277,7 +279,7 @@ struct ImageTranslationEditorSheet: View {
                         .foregroundStyle(Color.secondary)
                 }
                 Spacer()
-                Button("撤销删除") {
+                Button("撤销上一步") {
                     guard let previous = undoBlocks.popLast() else { return }
                     blocks = previous
                     selectedID = blocks.first?.id
@@ -286,6 +288,8 @@ struct ImageTranslationEditorSheet: View {
                     guard confirmYikeAction("重置图片译文？", detail: "文字、位置和样式将恢复为初始翻译结果。", action: "确认重置") else { return }
                     let restored = resetBlocks
                     blocks = restored
+                    undoBlocks.reset()
+                    dragStartBox = nil
                     selectedID = restored.first?.id
                 }
                 Button("取消") {
@@ -341,8 +345,10 @@ struct ImageTranslationEditorSheet: View {
                                     .onChanged { value in
                                         if selectedID != block.id {
                                             selectedID = block.id
+                                            undoBlocks.append(blocks)
                                             dragStartBox = block.boundingBox
                                         } else if dragStartBox == nil {
+                                            undoBlocks.append(blocks)
                                             dragStartBox = block.boundingBox
                                         }
                                         guard let start = dragStartBox,
@@ -420,7 +426,7 @@ struct ImageTranslationEditorSheet: View {
                                 .foregroundStyle(Color.secondary)
                             Text("没有译文框")
                                 .font(.system(size: 14, weight: .semibold))
-                            Text("可点击“重置”恢复识别结果。")
+                            Text("可点击“撤销上一步”恢复删除，或“重置”恢复识别结果。")
                                 .font(.system(size: 11))
                                 .foregroundStyle(Color.secondary)
                         }

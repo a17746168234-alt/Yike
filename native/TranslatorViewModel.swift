@@ -725,25 +725,43 @@ final class TranslatorViewModel: NSObject, ObservableObject, AVAudioPlayerDelega
 
     @Published var pendingImageCrop: ImageCropItem?
     func recognizeAndTranslateImage(at url: URL) {
-        guard !isRecognizingImage, !isLoading else { return }
-        guard let item = ImageCropItem(url: url) else {
-            setInfo("无法打开这张图片，请选择有效的图片文件")
-            return
+        guard !isRecognizingImage, !isLoading, pendingImageCrop == nil else { return }
+        isRecognizingImage = true
+        Task {
+            do {
+                let item = try await Task.detached(priority: .userInitiated) { try ImageCropItem(url: url) }.value
+                isRecognizingImage = false
+                pendingImageCrop = item
+            } catch {
+                isRecognizingImage = false
+                setError(error.localizedDescription)
+            }
         }
-        pendingImageCrop = item
     }
 
-    func finishImageCrop(_ image: CGImage) {
+    func finishImageCrop(_ item: ImageCropItem, selection: CGRect?) {
+        guard !isRecognizingImage else { return }
         pendingImageCrop = nil
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Yike-Crop-\(UUID().uuidString).png")
-        guard let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
-        do {
-            try data.write(to: url)
-            // Let the crop sheet dismiss before presenting OCR review.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.beginImageRecognition(at: url, deleteAfterUse: true)
+        isRecognizingImage = true
+        Task {
+            do {
+                let url = try await Task.detached(priority: .userInitiated) {
+                    let image = try item.croppedImage(selection: selection)
+                    let destination = FileManager.default.temporaryDirectory.appendingPathComponent("Yike-Crop-\(UUID().uuidString).png")
+                    guard let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+                        throw ImageImportError.unreadable
+                    }
+                    try data.write(to: destination)
+                    return destination
+                }.value
+                // Present OCR review only after SwiftUI finishes dismissing the crop sheet.
+                try? await Task.sleep(for: .milliseconds(300))
+                beginImageRecognition(at: url, deleteAfterUse: true)
+            } catch {
+                isRecognizingImage = false
+                setError("保存裁剪图片失败：\(error.localizedDescription)")
             }
-        } catch { setInfo("保存裁剪图片失败：\(error.localizedDescription)") }
+        }
     }
 
     func captureScreenRegionAndTranslate() {

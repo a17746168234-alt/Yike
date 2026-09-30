@@ -34,6 +34,13 @@ struct HistorySheet: View {
         }
     }
 
+    private var visibleSelectedIDs: Set<UUID> {
+        HistorySelection.visible(selectedIDs, ids: filteredHistory.map(\.id))
+    }
+    private var allVisibleSelected: Bool {
+        !filteredHistory.isEmpty && visibleSelectedIDs.count == filteredHistory.count
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
@@ -42,21 +49,21 @@ struct HistorySheet: View {
                 Spacer()
                 if historyKind == .text && !model.history.isEmpty {
                     if isSelecting {
-                        Button(selectedIDs.count == filteredHistory.count ? "取消全选" : "全选") {
-                            selectedIDs = selectedIDs.count == filteredHistory.count ? [] : Set(filteredHistory.map(\.id))
+                        Button(allVisibleSelected ? "取消全选" : "全选") {
+                            selectedIDs = HistorySelection.toggleAll(selectedIDs, ids: filteredHistory.map(\.id))
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
-                        Button("删除所选（\(selectedIDs.count)）") {
-                            guard confirmYikeAction("删除所选记录？", detail: "将删除所选的 \(selectedIDs.count) 条记录，无法撤销。", action: "确认删除") else { return }
-                            model.deleteHistory(ids: selectedIDs)
+                        Button("删除所选（\(visibleSelectedIDs.count)）") {
+                            guard confirmYikeAction("删除所选记录？", detail: "将删除所选的 \(visibleSelectedIDs.count) 条记录，无法撤销。", action: "确认删除") else { return }
+                            model.deleteHistory(ids: visibleSelectedIDs)
                             selectedIDs = []
                             isSelecting = false
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
                         .foregroundStyle(Color.red)
-                        .disabled(selectedIDs.isEmpty)
+                        .disabled(visibleSelectedIDs.isEmpty)
                     } else {
                         Button("多选") { isSelecting = true }
                             .buttonStyle(.bordered)
@@ -134,6 +141,8 @@ struct HistorySheet: View {
             }
 
             Divider()
+                .onChange(of: searchText) { _ in selectedIDs = visibleSelectedIDs }
+                .onChange(of: filteredHistory.map(\.id)) { _ in selectedIDs = visibleSelectedIDs }
 
             if historyKind == .image {
                 imageHistoryContent
